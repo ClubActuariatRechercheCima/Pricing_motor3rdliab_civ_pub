@@ -1,0 +1,5 @@
+[core]
+    remote = dagshub
+    autostage = true
+['remote "dagshub"']
+    url = https://dagshub.com/ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub.dvc
