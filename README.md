@@ -17,7 +17,7 @@
 5. [Accès aux données (DagsHub + DVC)](#accès-aux-données-dagshub--dvc)
 6. [Installation et reproduction](#installation-et-reproduction)
 7. [Article](#article)
-8. [Contribuer](#contribuer)
+8. [Contact et accès au projet](#contact-et-accès-au-projet)
 
 ---
 
@@ -92,7 +92,7 @@ Le fichier [`Data.dvc`](Data.dvc) contient l'empreinte (hash) du jeu de données
 ### 1. Prérequis
 
 - [Git](https://git-scm.com) et [DVC](https://dvc.org/doc/install) (`pip install dvc`) ;
-- un compte [DagsHub](https://dagshub.com) disposant des droits de lecture sur le dépôt.
+- un compte [DagsHub](https://dagshub.com) disposant des droits de lecture sur le dépôt. L'accès aux données est restreint : pour l'obtenir, voir [Contact et accès au projet](#contact-et-accès-au-projet).
 
 ### 2. Récupérer le projet et les données
 
@@ -118,16 +118,6 @@ Le token d'accès se génère dans DagsHub, sous *Paramètres* → *Tokens*. L'o
 dvc status -c      # doit afficher : Cache and remote 'dagshub' are in sync.
 ```
 
-### 4. Contribuer des données
-
-```bash
-dvc add Data                 # met à jour Data.dvc
-git add Data.dvc
-git commit -m "Mise à jour des données"
-dvc push                     # envoie les données sur DagsHub
-git push
-```
-
 ### Accès depuis Python
 
 ```python
@@ -150,12 +140,14 @@ dagshub.init(repo_owner="ClubActuariatRechercheCima",
 
 - **Article** : *Revue du tarif réglementaire en assurance responsabilité civile automobile en Côte d'Ivoire*, Yoboua Angoua. Version de travail du 25 mai 2022 : [`Results/Articles/YA-Version du 25 Mai.pdf`](Results/Articles/YA-Version%20du%2025%20Mai.pdf).
 
-## Contribuer
+## Contact et accès au projet
 
-1. Créer une branche à partir de `publication`.
-2. Commiter de petites modifications, avec des messages clairs.
-3. Ne jamais versionner de données brutes dans Git : utiliser DVC.
-4. Ouvrir une *pull request* pour relecture.
+Ce dépôt est une **version publique en lecture seule** du projet. Le développement se déroule dans un dépôt privé : les contributions ne sont pas reçues via ce dépôt (pas de *pull request*).
+
+Pour contribuer, obtenir l'accès aux données ou demander à être ajouté au projet privé, contactez la structure porteuse du projet :
+
+- **Club Actuariat Recherche CIMA** : <https://github.com/ClubActuariatRechercheCima>
+- Pour les droits sur les données, indiquez votre nom d'utilisateur **DagsHub** dans votre demande.
 
 ---
 
