@@ -16,7 +16,7 @@
 4. [Structure du dépôt](#structure-du-dépôt)
 5. [Accès aux données (DagsHub + DVC)](#accès-aux-données-dagshub--dvc)
 6. [Installation et reproduction](#installation-et-reproduction)
-7. [Documentation et article](#documentation-et-article)
+7. [Article](#article)
 8. [Contribuer](#contribuer)
 
 ---
@@ -67,7 +67,6 @@ Un tableau de synthèse des anomalies de données détectées est disponible dan
 ```text
 .
 ├── Data.dvc          # Pointeur DVC vers les données (stockées sur DagsHub)
-├── Docs/             # Documentation : comptes rendus, agenda, formation Git & DVC
 ├── Env/              # Environnement de travail (versions des logiciels et librairies)
 ├── Notebooks/        # Notebooks (Python, R, etc.)
 ├── Results/          # Graphiques, tableaux et article
@@ -147,12 +146,9 @@ dagshub.init(repo_owner="ClubActuariatRechercheCima",
    - `Software_version.txt` : versions des logiciels.
 3. Exécuter les scripts R du dossier [`Src/`](Src/) (les plus anciens sont dans `Src/Script old/`).
 
-## Documentation et article
+## Article
 
 - **Article** : *Revue du tarif réglementaire en assurance responsabilité civile automobile en Côte d'Ivoire*, Yoboua Angoua. Version de travail du 25 mai 2022 : [`Results/Articles/YA-Version du 25 Mai.pdf`](Results/Articles/YA-Version%20du%2025%20Mai.pdf).
-- **Comptes rendus de réunion** : [`Docs/Compte_rendus/`](Docs/Compte_rendus/).
-- **Agenda de finalisation des travaux** : [`Docs/Agenda_finalisation_travaux_article.xlsx`](Docs/Agenda_finalisation_travaux_article.xlsx).
-- **Formation Git & DVC** : [`Docs/Formation_Git&Dvc/`](Docs/Formation_Git&Dvc/), avec les aide-mémoire Git et DVC.
 
 ## Contribuer
 
