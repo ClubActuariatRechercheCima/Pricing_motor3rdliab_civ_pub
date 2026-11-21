@@ -60,8 +60,6 @@ Quelques-uns des graphiques produits (dossier [`Results/`](Results/)) :
 |:---:|:---:|
 | ![S/P Côte d'Ivoire](Results/SP_CI_Auto_Dommage.png) | ![Charge nette](Results/distribution_CHARE_NETTE.png) |
 
-Un tableau de synthèse des anomalies de données détectées est disponible dans [`Results/Anomalies/ResumeAnomalie.csv`](Results/Anomalies/ResumeAnomalie.csv).
-
 ## Structure du dépôt
 
 ```text
@@ -70,10 +68,8 @@ Un tableau de synthèse des anomalies de données détectées est disponible dan
 ├── Env/              # Environnement de travail (versions des logiciels et librairies)
 ├── Notebooks/        # Notebooks (Python, R, etc.)
 ├── Results/          # Graphiques, tableaux et article
-│   ├── Anomalies/    #   synthèse des anomalies de données
 │   └── Articles/     #   version de travail de l'article
-└── Src/              # Scripts R ayant produit les analyses
-    └── Scripts/      #   (contenu non publié : disponible sur demande)
+└── Scripts/          # Scripts R ayant produit les analyses (contenu non publié)
 ```
 
 Le dossier `Data/` n'est **pas versionné par Git** : il est géré par DVC (voir ci-dessous).
@@ -135,7 +131,7 @@ dagshub.init(repo_owner="ClubActuariatRechercheCima",
 2. Consulter les versions utilisées dans [`Env/`](Env/) :
    - `Requirements.txt` : librairies et leurs versions ;
    - `Software_version.txt` : versions des logiciels.
-3. Les scripts R (`Src/Scripts/`) ne sont pas publiés dans ce dépôt public : voir [Contact et accès au projet](#contact-et-accès-au-projet) pour les obtenir.
+3. Les scripts R (`Scripts/`) ne sont pas publiés dans ce dépôt public : voir [Contact et accès au projet](#contact-et-accès-au-projet) pour les obtenir.
 
 ## Article
 
