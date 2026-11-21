@@ -2,3 +2,5 @@
 .dvc/cache
 .DS_Store
 /Docs
+/Src/Scripts/*
+!/Src/Scripts/.gitkeep

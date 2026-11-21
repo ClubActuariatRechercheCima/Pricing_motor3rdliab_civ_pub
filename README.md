@@ -73,6 +73,7 @@ Un tableau de synthèse des anomalies de données détectées est disponible dan
 │   ├── Anomalies/    #   synthèse des anomalies de données
 │   └── Articles/     #   version de travail de l'article
 └── Src/              # Scripts R ayant produit les analyses
+    └── Scripts/      #   (contenu non publié : disponible sur demande)
 ```
 
 Le dossier `Data/` n'est **pas versionné par Git** : il est géré par DVC (voir ci-dessous).
@@ -134,7 +135,7 @@ dagshub.init(repo_owner="ClubActuariatRechercheCima",
 2. Consulter les versions utilisées dans [`Env/`](Env/) :
    - `Requirements.txt` : librairies et leurs versions ;
    - `Software_version.txt` : versions des logiciels.
-3. Exécuter les scripts R du dossier [`Src/`](Src/) (les plus anciens sont dans `Src/Script old/`).
+3. Les scripts R (`Src/Scripts/`) ne sont pas publiés dans ce dépôt public : voir [Contact et accès au projet](#contact-et-accès-au-projet) pour les obtenir.
 
 ## Article
 
