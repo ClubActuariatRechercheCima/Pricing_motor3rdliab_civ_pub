@@ -89,7 +89,7 @@ Le fichier [`Data.dvc`](Data.dvc) contient l'empreinte (hash) du jeu de données
 ### 1. Prérequis
 
 - [Git](https://git-scm.com) et [DVC](https://dvc.org/doc/install) (`pip install dvc`) ;
-- un compte [DagsHub](https://dagshub.com) disposant des droits de lecture sur le dépôt. L'accès aux données est restreint : pour l'obtenir, voir [Contact et accès au projet](#contact-et-accès-au-projet).
+- un compte [DagsHub](https://dagshub.com) disposant des droits de lecture sur le dépôt. Pour demander des droits, voir [Contact et accès au projet](#contact-et-accès-au-projet).
 
 ### 2. Récupérer le projet et les données
 
@@ -114,6 +114,18 @@ Le token d'accès se génère dans DagsHub, sous *Paramètres* → *Tokens*. L'o
 ```bash
 dvc status -c      # doit afficher : Cache and remote 'dagshub' are in sync.
 ```
+
+### Autre méthode : le bucket DagsHub Storage
+
+Une copie des données est aussi disponible dans le bucket du dépôt (DagsHub Storage), sous `Data/`. Depuis la racine du projet :
+
+```bash
+pip install --upgrade dagshub
+dagshub login
+dagshub download --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub Data Data
+```
+
+Le bucket n'est pas versionné avec les branches Git. Pour obtenir la version des données qui correspond à un commit, utilisez `dvc pull`.
 
 ### Accès depuis Python
 
