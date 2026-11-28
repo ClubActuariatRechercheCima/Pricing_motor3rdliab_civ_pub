@@ -5,3 +5,4 @@
 /Scripts/*
 !/Scripts/.gitkeep
 /Results/Anomalies
+.venv/

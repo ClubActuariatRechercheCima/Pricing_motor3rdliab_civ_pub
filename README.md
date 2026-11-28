@@ -88,10 +88,47 @@ Le fichier [`Data.dvc`](Data.dvc) contient l'empreinte (hash) du jeu de données
 
 ### 1. Prérequis
 
-- [Git](https://git-scm.com) et [DVC](https://dvc.org/doc/install) (`pip install dvc`) ;
+- [Git](https://git-scm.com) ;
+- [Python 3](https://www.python.org/downloads/) avec `pip` ;
 - un compte [DagsHub](https://dagshub.com) disposant des droits de lecture sur le dépôt. Pour demander des droits, voir [Contact et accès au projet](#contact-et-accès-au-projet).
 
-### 2. Récupérer le projet et les données
+### 2. Installer DVC et DagsHub
+
+Il est conseillé de les installer dans un environnement virtuel Python.
+
+**Linux / macOS**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+**Windows (PowerShell)**
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+**Puis, sur tous les systèmes**
+
+```bash
+python -m pip install --upgrade pip
+pip install --upgrade dvc dagshub
+
+# Vérifier l'installation
+dvc --version
+dagshub --help
+```
+
+- **DVC** récupère les données correspondant au fichier `Data.dvc` (`dvc pull`).
+- **DagsHub** fournit la commande `dagshub` (connexion, accès au bucket) et la bibliothèque Python.
+
+Autres méthodes d'installation de DVC : [documentation officielle](https://dvc.org/doc/install). Sur Debian ou Ubuntu, `python3 -m venv` peut nécessiter le paquet `python3-venv`.
+
+Le dossier `.venv/` est ignoré par Git.
+
+### 3. Récupérer le projet et les données
 
 ```bash
 git clone https://github.com/ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub.git
@@ -109,7 +146,7 @@ dvc pull
 
 Le token d'accès se génère dans DagsHub, sous *Paramètres* → *Tokens*. L'option `--local` l'enregistre dans `.dvc/config.local`, un fichier ignoré par Git.
 
-### 3. Vérifier que tout est synchronisé
+### 4. Vérifier que tout est synchronisé
 
 ```bash
 dvc status -c      # doit afficher : Cache and remote 'dagshub' are in sync.
@@ -120,7 +157,7 @@ dvc status -c      # doit afficher : Cache and remote 'dagshub' are in sync.
 Une copie des données est aussi disponible dans le bucket du dépôt (DagsHub Storage), sous `Data/`. Depuis la racine du projet :
 
 ```bash
-pip install --upgrade dagshub
+# DagsHub doit être installé (voir « Installer DVC et DagsHub »)
 dagshub login
 dagshub download --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub Data Data
 ```
