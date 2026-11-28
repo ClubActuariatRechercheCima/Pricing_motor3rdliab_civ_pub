@@ -69,7 +69,7 @@ Quelques-uns des graphiques produits (dossier [`Results/`](Results/)) :
 ├── Notebooks/        # Notebooks (Python, R, etc.)
 ├── Results/          # Graphiques, tableaux et article
 │   └── Articles/     #   version de travail de l'article
-├── Scripts/          # Scripts R ayant produit les analyses (contenu non publié)
+├── Scripts/          # Scripts R ayant produit les analyses
 ├── tools/            # Script de configuration DVC / DagsHub
 └── requirements.txt  # Dépendances Python pour l'accès aux données
 ```
@@ -281,7 +281,7 @@ git push
 2. Consulter les versions utilisées dans [`Env/`](Env/) :
    - `Requirements.txt` : librairies et leurs versions ;
    - `Software_version.txt` : versions des logiciels.
-3. Les scripts R (`Scripts/`) ne sont pas publiés dans ce dépôt public : voir [Contact et accès au projet](#contact-et-accès-au-projet) pour les obtenir.
+3. Exécuter les scripts R du dossier [`Scripts/`](Scripts/). Les chemins de fichiers y sont remplacés par `<CHEMIN_LOCAL>` et les identifiants de police par des valeurs génériques : adaptez-les à votre environnement. La connexion MySQL de `Instruction.R` lit les variables d'environnement `MYSQL_USER` et `MYSQL_PASSWORD`.
 
 ## Article
 

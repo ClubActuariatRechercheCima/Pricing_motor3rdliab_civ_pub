@@ -1,0 +1,3434 @@
+---
+title: "Etude_Tarification_RC"
+author: "Yoboua ANGOUA"
+date: "05/01/2025"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+  
+params:
+  DataFile: "<CHEMIN_LOCAL>/"
+  DataFileLarge: "<CHEMIN_LOCAL>/"
+  CA_Avenant: "<CHEMIN_LOCAL>/"
+    #YOBOUA/PreThesis/Git_hub_Pricing_motor3rdliab_civ/Pricing_motor3rdliab_civ/Data/CA_AVENANT"
+  Prime_Garantie: "<CHEMIN_LOCAL>/"
+  ClaimsDir: "<CHEMIN_LOCAL>/"
+  MarketDataFile: "<CHEMIN_LOCAL>/Contexte.xlsx"
+  MarketDataFile2: "<CHEMIN_LOCAL>/auto_ratios_2000_2020.xlsx"
+  ClaimsDataFile: Base_sinistre_Auto.xlsx
+  RESULTAT: "<CHEMIN_LOCAL>/"
+  RESULTAT2: "<CHEMIN_LOCAL>/"
+  ANOMALIE: "<CHEMIN_LOCAL>/"
+  BIBLIO: <CHEMIN_LOCAL>/Bibliotheques_Fonctions_02032023.R
+  RisquesFile: "Tables/TABLE_RISQUE_082021.txt"
+  PrimeAutoRisque: PN_AUTO_RISQUE.RDS
+  TableGarantie: "/Tables/TableGarantieAuto.csv"
+  TableCategorie: "/Tables/TableCodeCATE.CSV"
+  PeriodeAnalyse: 2003
+  Liste_Garantie: RC
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source(params$BIBLIO, encoding = "UTF-8")
+
+#load("<CHEMIN_LOCAL>/Prethese25Fevrier2022.RData")
+
+```
+
+##0 Package et Setup##
+
+```{r echo = FALSE, message=FALSE,warning=TRUE}
+MainTime<-Sys.time()
+Install_And_Load <- function(packages) {
+  k <- packages[!(packages %in% installed.packages()[,"Package"])];
+  if(length(k))
+  {install.packages(k, repos='https://cran.rstudio.com/',dep=T);}
+  
+  for(package_name in packages)
+  {library(package_name,character.only=TRUE, quietly = TRUE);}
+}
+  #Exécution et lecture des package attendues##
+list_packages=c('openxlsx','tidyverse','plyr','dplyr','ggplot2','readxl', 'readr', 'knitr','labelled', 'rlist','lubridate','plotly','epiDisplay','Hmisc','rpart','rpart.plot','rstatix','ggpubr','weights')
+Install_And_Load(list_packages)
+
+# Set New ggplot theme
+
+Angyl_theme<-theme_bw()+  theme(plot.title = element_text(color = "black"))+ theme(panel.border = element_rect(color = "black", size = 2))
+
+theme_set(Angyl_theme)
+
+```
+
+#0 Executer bibliotheques de fonctions
+
+```{r echo=TRUE}
+#source(params$BIBLIO, encoding = "UTF-8")
+```
+
+## 0 Chiffes de marchés
+
+```{r echo=TRUE}
+#knitr::opts_knit$set(root.dir = '<CHEMIN_LOCAL>/')
+#dir='<CHEMIN_LOCAL>/'
+#setwd(dir)
+MarketData=readxl::read_excel(params$MarketDataFile,sheet = 1)
+
+ggplot(MarketData[MarketData$Entite=="Marché Ivoirien",])+
+  geom_col(aes(y=Prime/656, x=Annee, fill=`Sous-Branche`))+
+  scale_y_continuous(breaks = 1e7*c(3,6,9), labels = paste0(c(30,60,90)," M€"))+
+  scale_fill_grey(label=c("Garanties Dommages", "Responsabilité Civile"))+
+  ylab("Primes Emises")+ 
+  xlab("Années")+
+  ggtitle("Evolution des Primes Emises en Automobile en Côte d'Ivoire")
+  
+ggsave("CA_Marche.png",device="png", path=params$RESULTAT)
+
+MarketDataFrance=readxl::read_excel(params$MarketDataFile2,sheet = "France")
+MarketDataKorean=readxl::read_excel(params$MarketDataFile2,sheet = "South Korean")
+
+MarketDataCI=readxl::read_excel(params$MarketDataFile2,sheet = "CI")
+names(MarketDataKorean)
+
+### Cas de la france
+SP_DataFrance <- MarketDataFrance %>% select( Année, `Ratio_Sinistres/Primes_Auto_hors_RC_(%)`, `Ratio_Sinistres/Primes_RC_Auto_(%)` ) %>% pivot_longer( cols = -Année, names_to = "Type_SP", values_to = "SP" ) %>% mutate( Type_SP = recode( Type_SP, `Ratio_Sinistres/Primes_Auto_hors_RC_(%)` = "SP Dommages", `Ratio_Sinistres/Primes_RC_Auto_(%)` = "SP RC" ) )
+
+p <- ggplot(SP_DataFrance, aes(x = Année, y = SP, color = Type_SP)) +
+  geom_line(size = 1.4) +          # lignes plus épaisses
+  geom_point(size = 1.2) +         # points plus visibles
+  geom_hline(yintercept = 95,
+             linetype = "dashed",
+             color = "red",
+             size = 1) +
+  scale_color_manual(
+    values = c("black", "grey40")  # noir + gris foncé
+  ) +
+  scale_y_continuous(limits = c(70, 110), breaks = seq(70, 110, 10)) +
+  labs(
+    title = "Évolution des ratios S/P - Branche Auto France",
+    x = "Années",
+    y = "Ratio Sinistres / Primes (%)",
+    color = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "top"
+  )
+print(p)
+####  South Korean
+SP_DataKorean <- MarketDataKorean %>%
+  transmute(
+    Annee = Classification,
+    Type_SP = "SP Dommages + RC",
+    SP = `Loss ratio`
+  )
+
+library(ggplot2)
+
+ggplot(SP_DataKorean, aes(x = Annee, y = SP)) +
+  geom_line(colour = "grey30", size = 1) +
+  geom_point(colour = "grey30", size = 0.3) +
+  scale_y_continuous(limits = c(0.75, NA)) +
+  ylab("Ratio Sinistres / Primes (%)") +
+  xlab("Classification") +
+  ggtitle("Évolution du ratio S/P Automobile – Corée") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  )
+
+ggsave(
+  "SP_Auto_Coree.png",
+  device = "png",
+  path = params$RESULTAT
+)
+
+### COTE D'IVOIRE
+# 2. Mise en forme des données
+# 2. Transformation des données
+# 2. Nettoyage + reshape
+SP_CI <- MarketDataCI %>%
+  select(Année, `S/P RC`, `S/P Dommage`) %>%
+  pivot_longer(
+    cols = c(`S/P RC`, `S/P Dommage`),
+    names_to = "Type_SP",
+    values_to = "SP"
+  ) %>%
+  mutate(
+    Année = as.numeric(Année),
+    SP = trimws(SP),                 # enlève espaces invisibles
+    SP = gsub("%", "", SP),
+    SP = gsub(",", ".", SP),
+    SP = as.numeric(SP)
+  )
+
+# 3. Vérification CRITIQUE (doit afficher des chiffres)
+print(SP_CI)
+
+p <- ggplot(
+  SP_CI,
+  aes(x = Année, y = SP, group = Type_SP, color = Type_SP)
+) +
+  geom_line(size = 2) +
+  geom_point(size = 3) +
+  scale_color_manual(
+    values = c(
+      "S/P RC" = "grey",
+      "S/P Dommage" = "black"
+    )
+  ) +
+  scale_y_continuous(
+    limits = c(20, 60),
+    breaks = seq(20, 60, 5)
+  ) +
+  labs(
+    title = "Évolution des ratios S/P RC et Dommage – Côte d’Ivoire",
+    x = "Années",
+    y = "Ratio Sinistres / Primes (%)",
+    color = NULL
+  ) +
+  theme_minimal(base_size = 22) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 30),
+    axis.title = element_text(face = "bold", size = 24),
+    axis.text = element_text(size = 20),
+    legend.text = element_text(size = 20),
+    legend.position = "top"
+  )
+
+print(p)
+
+ggsave(
+  filename = "SP_CI_Auto_Dommage.png",
+  plot = p,
+  path = params$RESULTAT,
+  width = 16,
+  height = 10,
+  dpi = 300
+)
+
+#### Quantile
+
+# Lecture des données
+data <- read_delim("<CHEMIN_LOCAL>/Base_SIN_RC_Auto_Analyse.csv", delim = ";")
+
+# Nettoyage et préparation
+df_clean <- data %>%
+  select(Id_RISQUE, COUTS_SINISTRES) %>%
+  filter(!is.na(COUTS_SINISTRES), COUTS_SINISTRES > 0)
+
+# Statistiques basiques pour comprendre la distribution
+summary_stats <- summary(df_clean$COUTS_SINISTRES)
+print(summary_stats)
+
+# Calcul quantiles
+q_975 <- quantile(df_clean$COUTS_SINISTRES, 0.975, na.rm = TRUE)
+q_99  <- quantile(df_clean$COUTS_SINISTRES, 0.99, na.rm = TRUE)
+
+# Choix limite max x-axis = un peu au-dessus du 99ème quantile
+x_max <- q_99 * 1.1
+
+# Calcul de la densité pour placer les annotations précisément
+dens <- density(df_clean$COUTS_SINISTRES[df_clean$COUTS_SINISTRES <= x_max])
+
+# Plot
+p<- ggplot(df_clean %>% filter(COUTS_SINISTRES <= x_max), aes(x = COUTS_SINISTRES)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 40, fill = "grey30", color = "black", alpha = 0.8) +
+  geom_density(color = "black", size = 1.3) +
+  geom_vline(xintercept = q_975, linetype = "dashed", color = "grey50", size = 1.2) +
+  geom_vline(xintercept = q_99, linetype = "dashed", color = "black", size = 1.2) +
+  annotate("text", x = q_975, y = max(dens$y)*0.9, label = "97,5 %", color = "grey50", size = 6, angle = 90, vjust = -0.5) +
+  annotate("text", x = q_99, y = max(dens$y)*0.9, label = "99 %", color = "black", size = 6, angle = 90, vjust = -0.5) +
+  coord_cartesian(xlim = c(0, x_max)) +   # Zoom sur la plage utile
+  labs(title = "Distribution de CHARGE par risque (zoom sur quantiles)",
+       x = "Charge_sinistre",
+       y = "Densité") +
+  theme_minimal(base_size = 18) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 24),
+    axis.title = element_text(face = "bold", size = 20),
+    axis.text = element_text(size = 16)
+  )
+
+ggsave("distribution_CHARGE_SINIETRE.png", plot = p, width = 10, height = 7, dpi = 300, path = params$RESULTAT)
+
+  
+```
+
+## 01 Lecture de table de paramètre
+
+```{r}
+ TableGarantieAuto <- read_delim(paste0(params$DataFile,params$TableGarantie), ";", escape_double = FALSE, na = "null", trim_ws = TRUE)
+  TableCategorie <- read_delim(paste0(params$DataFile,params$TableCategorie), ";", escape_double = FALSE, na = "null", trim_ws = TRUE)
+```
+
+## 02-A Lecture des primes par risques, polices, garanties
+
+```{r}
+#dir='<CHEMIN_LOCAL>/'
+dir=params$DataFileLarge
+#setwd(dir)
+
+rm(PrimeAutoRisque)
+#rm(PrimeAutoRisque3)
+rm(PrimeAutoRisque2)
+
+PrimeAutoRisque<-read_rds(paste0(dir,"PN_AUTO_RISQUE/",params$PrimeAutoRisque))
+# la variable PrimeNette porte la prime par garantie
+
+
+# Ignore les avenant non attribué à une garantie car il n y  pas de prime nette sur ces lignes.
+
+#Identifiabilité des risques
+PrimeAutoRisque$Id_Police=paste(as.character(PrimeAutoRisque$CODEINTE),as.character(PrimeAutoRisque$NUMEPOLI),sep="_")
+PrimeAutoRisque$Id_RISQUE=paste(PrimeAutoRisque$Id_Police,as.character(PrimeAutoRisque$CODERISQ),sep="_")
+
+
+ 
+   
+
+# Conversion en format date
+PrimeAutoRisque$DATEECHE = as.Date(PrimeAutoRisque$DATEECHE,format = "%Y-%m-%d")
+PrimeAutoRisque$DATEEFFE = as.Date(PrimeAutoRisque$DATEEFFE,format = "%Y-%m-%d")
+PrimeAutoRisque$DATECOMP = as.Date(PrimeAutoRisque$DATECOMP,format = "%Y-%m-%d")
+ PrimeAutoRisque$DATE_MEC= as.Date(PrimeAutoRisque$DATE_MEC,format = "%Y-%m-%d")
+ 
+PrimeAutoRisque$ANNEE = ExtractionAnnee(PrimeAutoRisque$DATECOMP)
+
+PrimeAutoRisque2= PrimeAutoRisque[PrimeAutoRisque$ANNEE> params$PeriodeAnalyse,]
+
+PrimeAutoRisque2$Id_Avenant=paste(as.character(PrimeAutoRisque2$Id_Police),as.character(PrimeAutoRisque2$NUMEAVEN),sep="_")
+
+
+#Création de deux autres indicateurs ##
+  PrimeAutoRisque2$Id_Police_Echeance=paste(PrimeAutoRisque2$Id_Police,PrimeAutoRisque2$DATEECHE,sep="_")
+  
+  PrimeAutoRisque2$CODERISQ=ifelse(is.na(PrimeAutoRisque2$CODERISQ),0,PrimeAutoRisque2$CODERISQ)
+
+   PrimeAutoRisque2$Id_Police_Risque_Echeance=paste(PrimeAutoRisque2$Id_Police,PrimeAutoRisque2$CODERISQ,PrimeAutoRisque2$DATEECHE,sep="_")
+   
+# Conversion des Primes nettes
+
+PrimeAutoRisque3=PrimeAutoRisque2
+PrimeAutoRisque2$PRIMNETT_SUP=PrimeAutoRisque2$PRIMNETT
+PrimeAutoRisque2$PRIMNETT=PrimeAutoRisque2$PRIMNETTE
+PrimeAutoRisque2$PRIMNETTE=PrimeAutoRisque2$PRIMNETT_SUP
+
+#PRIMENETT correspond à la prime de la garantie
+#PRIMENETTE correspond à la prime de la police
+#CHIFAFFA correspond à la PRIMENETTE+ACCESSOIRE au niveau de la police.
+
+summary(PrimeAutoRisque2$PRIMNETT)
+
+rm(PrimeAutoRisque3)
+
+
+
+
+###
+#PrimeAutoRisque2$CODEGARA = PrimeAutoRisque2$CODEGARA
+PrimeAutoRisque2$CODEGARA= as.factor(PrimeAutoRisque2$CODEGARA)
+PrimeAutoRisque2$CODEGARA=as.character(PrimeAutoRisque2$CODEGARA)
+
+PrimeAutoRisque2$CODEGARA[is.na(PrimeAutoRisque2$CODEGARA)]=""
+PrimeAutoRisque2$CODEGARA =  as.factor(PrimeAutoRisque2$CODEGARA)
+
+PrimeAutoRisque2$CODEGARA2 =  PrimeAutoRisque2$CODEGARA
+levels(PrimeAutoRisque2$CODEGARA2)<-TableGarantieAuto$Var2
+
+PrimeAutoRisque2$CODEGARA3 =  PrimeAutoRisque2$CODEGARA
+levels(PrimeAutoRisque2$CODEGARA3)<-TableGarantieAuto$Var3
+
+PrimeAutoRisque2$VarRapportActua =  PrimeAutoRisque2$CODEGARA
+levels(PrimeAutoRisque2$VarRapportActua)<-TableGarantieAuto$VarRapportActua
+
+  #Puissances
+#write.csv(table(PrimeAutoRisque2$PUISVEHI),"PuissanceVehicule.csv")
+PrimeAutoRisque2$PUISVEHICAT= cut(PrimeAutoRisque2$PUISVEHI,breaks= c(-1,0,1,2,3,4,5,6,7,8,9,10,11, 7076),labels=c("0","1","2","3","4","5","6","7","8","9","10","11","12 et plus"))
+
+
+
+PrimeAutoRisque2$PUISVEHICAT=as.character(PrimeAutoRisque2$PUISVEHICAT)
+PrimeAutoRisque2$PUISVEHICAT[is.na(PrimeAutoRisque2$PUISVEHICAT)]="Inconnu"
+PrimeAutoRisque2$PUISVEHICAT=as.factor(PrimeAutoRisque2$PUISVEHICAT)
+PrimeAutoRisque2$PUISVEHICAT=ordered(PrimeAutoRisque2$PUISVEHICAT,levels=c("0","1","2","3","4","5","6","7","8","9","10","11", "12 et plus", "Inconnu"))
+  
+  #POIDVEHI
+PrimeAutoRisque2$POIDVEHI=str_replace(PrimeAutoRisque2$POIDVEHI,",",".")
+PrimeAutoRisque2$POIDVEHI2=as.numeric(PrimeAutoRisque2$POIDVEHI)
+
+  #CODEZONE
+  PrimeAutoRisque2$CODEZONE[is.na(PrimeAutoRisque2$CODEZONE)]="Inconnu"
+  PrimeAutoRisque2$CODEZONE=as.factor(PrimeAutoRisque2$CODEZONE)
+  #TYPEMOTE
+   PrimeAutoRisque2$TYPEMOTE[is.na(PrimeAutoRisque2$TYPEMOTE)]="Inconnu"
+     PrimeAutoRisque2$TYPEMOTE=as.factor(PrimeAutoRisque2$TYPEMOTE)
+
+  #Harmonisation Codecate
+  PrimeAutoRisque2$CODECATE2=as.factor(PrimeAutoRisque2$CODECATE)
+     levels(PrimeAutoRisque2$CODECATE2)<-TableCategorie$Lib[1:12]
+       PrimeAutoRisque2$CODECATE3=PrimeAutoRisque2$CODECATE2
+       levels(PrimeAutoRisque2$CODECATE3)<-TableCategorie$UsageReg[1:12]
+       
+       
+   # Variable usage CATERISQ
+       PrimeAutoRisque2$CATERISQ[is.na(PrimeAutoRisque2$CATERISQ)]="Inconnu"
+       PrimeAutoRisque2$CATERISQ=as.factor(PrimeAutoRisque2$CATERISQ)
+
+       
+    #Création d'une variable Flotte
+   PrimeAutoRisque2$FLOTTE=ifelse(PrimeAutoRisque2$CODECATE=="400",TRUE,FALSE)    
+   
+       SumDouble(PrimeAutoRisque2$PRIMNETT)
+     
+    
+    #Transformation de la MEC en date
+      # PrimeAutoRisque2$DATE_MEC
+    #     PrimeAutoRisque2$DATE_MEC2= as.Date(PrimeAutoRisque2$DATE_MEC,format = "%d/%m/%Y")
+          
+    ## Réaliser toutes les corrections de variables importantes ici.
+ 
+
+     saveRDS(PrimeAutoRisque2, paste0(params$RESULTAT2,"PrimeAutoRisque.RDS"))
+
+```
+
+## 02-B Préparation des fichiers Prime Auto Risque RC pour le caclculs des expositions et primes acquises
+
+```{r}
+
+
+
+## Données à la maille flux de primes
+rm(PrimeAutoRisque2)
+if (!exists("PrimeAutoRisque2"))
+{
+ PrimeAutoRisque2=    readRDS( paste0(params$RESULTAT2,"PrimeAutoRisque.RDS"))
+}
+
+PrimeAutorisque_pour_PrimeAcquise=PrimeAutoRisque2%>%dplyr::filter(CODEGARA %in% params$Liste_Garantie)
+
+##Données à la maille identification des risques pour le calcul des expositions.
+
+Colonnes_a_retirer=c("TYPEMOUV","GENRMOUV","NUMEQUIT","CODTYPQU","NUMEAVEN","AVENMODI","PRIMNETT_SUP","DATEENTR","CODEBRAN","LIBEBRAN","NUMECHAS","DATEENTR","DATESORT","TYPEVEHI")
+Colonne_a_conserver=c("CODTYPIN","LIBTYPIN","CODEINTE","RAISOCIN","CODEASSU","CODECATE","CODECATE2","LIBECATE", "DATEECHE","Id_Police_Risque_Echeance","Id_Police","Id_RISQUE","CODERISQ","CATERISQ","CODEGARA","CODEGARA3","TYPEMOTE","PUISVEHICAT","CODEZONE","FLOTTE")
+Colonne_Indicateurs_Modifier=c("DATEEFFE","PRIMNETT","PRIMNETTE","CHIFAFFA","DATE_MEC")
+#Données à la maille risque X échéances
+by_Variables=setdiff(colnames(PrimeAutoRisque2),union(Colonnes_a_retirer,Colonne_Indicateurs_Modifier))
+
+
+PrimeAutorisque_pour_Exposition=PrimeAutoRisque2 %>%
+  dplyr::filter(CODEGARA %in% params$Liste_Garantie)%>%
+  dplyr::group_by_at(Colonne_a_conserver)%>%
+  dplyr::summarise(
+  DATEEFFE=min(DATEEFFE,na.rm = TRUE),
+  #PRIMNETT=sum(PRIMNETT,na.rm = TRUE),
+  PRIMNETTE=min(PRIMNETTE,na.rm = TRUE),
+   CHIFAFFA=min(CHIFAFFA,na.rm = TRUE),
+   DATE_MEC=first(DATE_MEC),
+ NOMBPLAC=first(NOMBPLAC),
+ POIDVEHI2=first(POIDVEHI2)
+  
+  )#%>%
+  #rename(PRIMNETE_Gar=PRIMNETT)      
+
+# Conserver la Base PrimeAutorisque_pour_Exposition qui servira aux travaux
+
+# Détections des anomalies d'expositions et de prime
+ PrimeAutorisque_pour_Exposition$AnneePolice= Exposition(PrimeAutorisque_pour_Exposition$DATEEFFE,PrimeAutorisque_pour_Exposition$DATEECHE)
+
+PrimeAutorisque_pour_Exposition$PrimeMoy=PrimeAutorisque_pour_Exposition$PRIMNETT/PrimeAutorisque_pour_Exposition$AnneePolice
+
+      
+
+      {
+#PrimeAutorisque_pour_PrimeAcquise$CAPRIS01=ifelse(is.na(PrimeAutorisque_pour_PrimeAcquise$CAPRIS01),0,PrimeAutorisque_pour_PrimeAcquise$CAPRIS01)
+#PrimeAutorisque_pour_PrimeAcquise$CAPRIS02=ifelse(is.na(PrimeAutorisque_pour_PrimeAcquise$CAPRIS02),0,PrimeAutorisque_pour_PrimeAcquise$CAPRIS02)
+
+
+#PrimeAutorisque_pour_PrimeAcquise$CYLIVEHI=ifelse(is.na(PrimeAutorisque_pour_PrimeAcquise$CYLIVEHI),0,PrimeAutorisque_pour_PrimeAcquise$CYLIVEHI)
+#PrimeAutorisque_pour_PrimeAcquise$NOMBPLAC=ifelse(is.na(PrimeAutorisque_pour_PrimeAcquise$NOMBPLAC),0,PrimeAutorisque_pour_PrimeAcquise$NOMBPLAC)
+
+#PrimeAutorisque_pour_PrimeAcquise$CODEZONE=as.character(PrimeAutorisque_pour_PrimeAcquise$CODEZONE)
+##PrimeAutorisque_pour_PrimeAcquise$TYPEMOTE=as.character(PrimeAutorisque_pour_PrimeAcquise$TYPEMOTE)
+#PrimeAutorisque_pour_PrimeAcquise$PUISVEHICAT=as.character(PrimeAutorisque_pour_PrimeAcquise$PUISVEHICAT)
+##PrimeAutorisque_pour_PrimeAcquise$CATERISQ=as.character(PrimeAutorisque_pour_PrimeAcquise$CATERISQ)
+
+
+#PrimeAutorisque_pour_PrimeAcquise$CARRVEHI=ifelse(is.na(PrimeAutorisque_pour_PrimeAcquise$CARRVEHI),"INCONNU",PrimeAutorisque_pour_PrimeAcquise$CARRVEHI)
+
+# PrimeAutorisque_pour_PrimeAcquise$MARQVEHI=ifelse(is.na(PrimeAutorisque_pour_PrimeAcquise$MARQVEHI),"INCONNU",PrimeAutorisque_pour_PrimeAcquise$MARQVEHI)
+# 
+# 
+# PrimeAutorisque_pour_PrimeAcquise$DATE_MEC=ifelse(is.na(PrimeAutorisque_pour_PrimeAcquise$DATE_MEC),"INCONNU",PrimeAutorisque_pour_PrimeAcquise$DATE_MEC)
+# 
+# PrimeAutorisque_pour_PrimeAcquise$TYPEVEHI=ifelse(is.na(PrimeAutorisque_pour_PrimeAcquise$TYPEVEHI),"INCONNU",PrimeAutorisque_pour_PrimeAcquise$TYPEVEHI)
+# 
+# 
+# PrimeAutorisque_pour_PrimeAcquise$CODGENAU=ifelse(is.na(PrimeAutorisque_pour_PrimeAcquise$CODGENAU),"INCONNU",PrimeAutorisque_pour_PrimeAcquise$CODGENAU)
+# 
+# PrimeAutorisque_pour_PrimeAcquise$CATERISQ=ifelse(is.na(PrimeAutorisque_pour_PrimeAcquise$CATERISQ),"INCONNU",PrimeAutorisque_pour_PrimeAcquise$CATERISQ)
+
+
+}
+      
+saveRDS(PrimeAutorisque_pour_Exposition, paste0(params$RESULTAT2,"Base_Prime_Travaux.RDS"))
+ 
+
+```
+
+## 03- lecture et Identification des RISQUEs sinistrés
+
+88% des risques ne sont pas identifiables dans la table des risques. Il s'agit principalement de risques de 2004 et antérieurs : L'étude va porter sur les survenance 2005-2015.
+
+```{r}
+
+#dir='<CHEMIN_LOCAL>/'
+#setwd(dir)
+dir=paste0(params$DataFileLarge)
+setwd(dir)
+
+
+
+Base_risque<-read_delim(paste0(dir,params$RisquesFile),  "|", escape_double = FALSE,  trim_ws = TRUE)
+#attach(Base_risque)
+
+#Construire l'indentifiant des risques
+
+Base_risque$Id_Police=paste(as.character(Base_risque$CODEINTE),as.character(Base_risque$NUMEPOLI),sep="_")
+Base_risque$Id_RISQUE=paste(Base_risque$Id_Police,as.character(Base_risque$CODERISQ),sep="_")
+
+  # Identifier les Risques Qui ont eu des sinistres.
+    # Vérifier que tous les risques qui ont des sinistres sont dans la table des risques
+   
+
+#PUISVEHICAT
+Base_risque$PUISVEHICAT= cut(Base_risque$PUISVEHI ,breaks= c(-1,0,1,2,3,4,5,6,7,8,9,10,11, 7076),labels=c("0","1","2","3","4","5","6","7","8","9","10","11","12 et plus"))
+
+Base_risque$PUISVEHICAT=as.character(Base_risque$PUISVEHICAT)
+Base_risque$PUISVEHICAT[is.na(Base_risque$PUISVEHICAT)]="Inconnu"
+Base_risque$PUISVEHICAT=as.factor(Base_risque$PUISVEHICAT)
+
+Base_risque$PUISVEHICAT=ordered(Base_risque$PUISVEHICAT,levels=c("0","1","2","3","4","5","6","7","8","9","10","11", "12 et plus", "Inconnu"))
+
+  
+  #POIDVEHI
+Base_risque$POIDVEHI=str_replace(Base_risque$POIDVEHI,",",".")
+Base_risque$POIDVEHI2=as.numeric(Base_risque$POIDVEHI)
+
+  #CODEZONE
+  Base_risque$CODEZONE=as.character(Base_risque$CODEZONE)
+  Base_risque$CODEZONE[is.na(Base_risque$CODEZONE)]="Inconnu"
+  Base_risque$CODEZONE=as.factor(Base_risque$CODEZONE)
+  
+  #TYPEMOTE
+  Base_risque$TYPEMOTE[(Base_risque$TYPEMOTE=="17900000")]="Inconnu"
+  Base_risque$TYPEMOTE[is.na(Base_risque$TYPEMOTE)]="Inconnu"
+  Base_risque$TYPEMOTE=as.factor(Base_risque$TYPEMOTE)
+
+  #Date de mise en circulation
+  Base_risque$DATE_MEC= as.Date(Base_risque$DATE_MEC,format = "%d/%m/%Y")
+
+
+  saveRDS(Base_risque, paste0(params$RESULTAT2,"Base_risque.RDS"))
+#Base_risque=readRDS( paste0(params$RESULTAT,"Base_risque.RDS"))
+
+
+```
+
+## 04-A Répertoire de données et lecture - SINISTRE et préparation
+
+```{r Lecture Sinistre}
+
+#dir='<CHEMIN_LOCAL>/'
+dir=params$ClaimsDir
+#rm(Base_Sinistre_risque)
+if (exists("Base_Sinistre_risque"))
+{
+rm(Base_Sinistre_risque)
+  }
+
+#Base_Sinistre_risque<-read_delim(paste0(dir,"/",params$ClaimsDataFile),  "|", escape_double = FALSE,  trim_ws = TRUE)
+Base_Sinistre_risque <- read_excel(paste0(dir,"/",params$ClaimsDataFile))
+
+# Restriction sur l'auto:
+  Base_Sinistre_Auto=Base_Sinistre_risque[Base_Sinistre_risque$CODEBRAN==4,]
+summary(Base_Sinistre_Auto)
+
+Base_Sinistre_Auto$DATEEFFE=as.Date(Base_Sinistre_Auto$DATEEFFE, format("%d/%m/%Y"))
+Base_Sinistre_Auto$DATEECHE=as.Date(Base_Sinistre_Auto$DATEECHE, format("%d/%m/%Y"))
+Base_Sinistre_Auto$DATESURV=as.Date(Base_Sinistre_Auto$DATESURV, format("%d/%m/%Y"))
+Base_Sinistre_Auto$DATEDECL=as.Date(Base_Sinistre_Auto$DATEDECL, format("%d/%m/%Y"))
+#Base_Sinistre_Auto$
+
+##IdENTIFIABILITE DES RISQUES et DES SINSITRES
+    ## Vérifier que la police et le risques sont identifiables. 
+
+Base_Sinistre_Auto$Id_Police=paste(as.character(Base_Sinistre_Auto$CODEINTE),as.character(Base_Sinistre_Auto$NUMEPOLI),sep="_")
+Base_Sinistre_Auto$Id_RISQUE=paste(Base_Sinistre_Auto$Id_Police,as.character(Base_Sinistre_Auto$CODERISQ),sep="_")
+
+  Base_Sinistre_Auto$Id_Police_Echeance=paste(Base_Sinistre_Auto$Id_Police,Base_Sinistre_Auto$DATEECHE,sep="_")
+  
+  Base_Sinistre_Auto$CODERISQ=ifelse(is.na(Base_Sinistre_Auto$CODERISQ),0,Base_Sinistre_Auto$CODERISQ)
+
+   Base_Sinistre_Auto$Id_Police_Risque_Echeance=paste(Base_Sinistre_Auto$Id_Police,Base_Sinistre_Auto$CODERISQ,Base_Sinistre_Auto$DATEECHE,sep="_")
+   
+##IdENTIFIABILITE DES SINSITRES
+Base_Sinistre_Auto$Id_SINI=paste(as.character(Base_Sinistre_Auto$ANNEE),as.character(Base_Sinistre_Auto$CODEINTE),as.character(Base_Sinistre_Auto$NUMESINI),sep="_")
+
+Base_Sinistre_Auto$Id_SINI_GAR=paste(Base_Sinistre_Auto$Id_SINI,Base_Sinistre_Auto$CODEGARA,sep="_")
+  Base_Sinistre_Auto$Id_SINI_GAR_CODECATE=paste(Base_Sinistre_Auto$Id_SINI_GAR,Base_Sinistre_Auto$CODECATE,sep="_")
+
+
+# Harmonisation CODEGARA
+
+Base_Sinistre_Auto$CODEGARA = as.factor(Base_Sinistre_Auto$CODEGARA)
+Base_Sinistre_Auto$CODEGARA3=Base_Sinistre_Auto$CODEGARA
+#levels(Base_Sinistre_Auto$CODEGARA3)=c("DOM","ARDR","DOM", "ARDR","IPT","DOM","IPT","ASS","RC","DOM","DOM","DOM","DOM","DOM","DOM","DOM","DOM","DOM")
+levels(Base_Sinistre_Auto$CODEGARA3)=c("AVR","BDG","DR", "IC","INC","IPT","Autres","RC","Autres","TCM","TCL","TCM","TCP","VOL","VOL","VOL","VOL")
+
+#Base_Sinistre_Auto$VarRapportActua=Base_Sinistre_Auto$CODEGARA
+#levels(Base_Sinistre_Auto$VarRapportActua)=c( "Autres" ,  "Autres" ,  "Bris de Glaces",   "Autres",  "Autres"  ,  "Autres" ,  "Autres" ,  "Assistance" , "RC" ,   "Autres" ,  "Dommage" ,  "Dommage" ,  "Dommage" ,  "Dommage" ,  "Autres" ,  "Autres"  , "Autres"  , "Autres")
+
+#harmonisation CodeCate
+Base_Sinistre_Auto$CODECATE = as.factor(Base_Sinistre_Auto$CODECATE)
+ Base_Sinistre_Auto$CODECATE2=Base_Sinistre_Auto$CODECATE
+     #levels(Base_Sinistre_Auto$CODECATE2)<-TableCategorie$Lib[1:12]
+       #Base_Sinistre_Auto$CODECATE3=Base_Sinistre_Auto$CODECATE
+      # levels(Base_Sinistre_Auto$CODECATE3)<-TableCategorie$UsageReg[1:12]
+
+
+              
+   # Variable usage CATERISQ
+       Base_Sinistre_Auto$CATERISQ=as.factor(Base_Sinistre_Auto$CATERISQ)
+
+    #Création d'une variable Flotte
+   Base_Sinistre_Auto$FLOTTE=ifelse(Base_Sinistre_Auto$CODECATE=="400",TRUE,FALSE)    
+   
+
+Base_Sinistre_Auto$ANNEESURV=ExtractionAnnee(Base_Sinistre_Auto$DATESURV)
+#as.numeric(format(Base_Sinistre_Auto$DATESURV,format="%Y"))
+
+
+Base_Sinistre_Auto$RECENC[is.na(Base_Sinistre_Auto$RECENC)]=0
+Base_Sinistre_Auto$RECENC_ANT[is.na(Base_Sinistre_Auto$RECENC_ANT)]=0
+Base_Sinistre_Auto$AREC[is.na(Base_Sinistre_Auto$AREC)]=0
+
+Base_Sinistre_Auto$PAYEALLNET=Base_Sinistre_Auto$SINPAY+Base_Sinistre_Auto$SINPAY_ANT-Base_Sinistre_Auto$RECENC-Base_Sinistre_Auto$RECENC_ANT
+Base_Sinistre_Auto$SAPNET=Base_Sinistre_Auto$SAP-Base_Sinistre_Auto$AREC
+
+Base_Sinistre_Auto$CHARGENET=Base_Sinistre_Auto$PAYEALLNET+Base_Sinistre_Auto$SAPNET
+  Base_Sinistre_Auto$NBSIN=1
+  
+  Base_Sinistre_Auto$NATUSINI=as.factor(Base_Sinistre_Auto$NATUSINI)
+
+     saveRDS(Base_Sinistre_Auto, paste0(params$RESULTAT2,"Base_Sinistre_Auto.RDS"))
+
+
+```
+
+## 04-B Analyse des anomalies Sinistres et construction de la base d'analyse.
+
+```{r}
+# Detection des différents cas d'anomalie
+
+if (!exists("Base_Sinistre_Auto"))
+{
+   Base_Sinistre_Auto= readRDS( paste0(params$RESULTAT2,"Base_Sinistre_Auto.RDS"))
+}
+  
+if (!exists("Base_risque"))
+{
+   Base_risque= readRDS( paste0(params$RESULTAT2,"Base_risque.RDS"))
+}   
+
+
+Base_Sinistre_Auto_Detection_Anomalie=detection_anomalie(Base_Sinistre_Auto)
+
+ # Vec_Bool_sinistre_sansFlux1=(Base_Sinistre_Auto$SAPNET==0) & (Base_Sinistre_Auto$PAYEALLNET==0)
+ # Vec_Bool_sinistre_sansFlux2=(Base_Sinistre_Auto$SAP==0) &(Base_Sinistre_Auto$AREC==0) & (Base_Sinistre_Auto$SINPAY==0)& (Base_Sinistre_Auto$SINPAY_ANT==0) & (Base_Sinistre_Auto$RECENC==0) & (Base_Sinistre_Auto$RECENC_ANT==0)
+
+# identification des sinistres associés à des risques non présents dans la base risque. 
+Bool_Id_RISQUE_Sin = Base_Sinistre_Auto_Detection_Anomalie$Id_RISQUE %in% Base_risque$Id_RISQUE
+Base_Sinistre_Auto_Detection_Anomalie$Bool_Id_RISQUE_Sin=Bool_Id_RISQUE_Sin
+
+
+# Selection des sinistres à retenir pour l'analyse. ## on analyse les anomaries en prenant uniquement un filtre sur la période
+#Base_Sinistre_Analyse<-Base_Sinistre_Auto_Detection_Anomalie%>%dplyr::filter(CODEGARA %in% params$Liste_Garantie, ANNEESURV>params$PeriodeAnalyse,Bool_Id_RISQUE_Sin ==TRUE)
+
+Base_Sinistre_Analyse<-Base_Sinistre_Auto_Detection_Anomalie%>%dplyr::filter( ANNEESURV>params$PeriodeAnalyse)
+
+rm(Base_Sinistre_Auto_Detection_Anomalie)
+
+
+# saveRDS(Base_Sinistre_Auto, paste0(params$RESULTAT,"Base_SIN_RC_Auto_Analyse.RDS"))
+ #write.csv2(Base_Sinistre_Auto,file =paste0(params$RESULTAT,"Base_SIN_RC_Auto_Analyse.csv"))
+
+# Résumé des informations d'anomalies.
+
+ResumeAnomalie<-Base_Sinistre_Analyse%>%dplyr::group_by(MOTIF_ANOMAL)%>%
+  dplyr::summarise( CHARGENET= SumDouble(CHARGENET,na.rm = TRUE), PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(Id_SINI), Nbre=n())
+
+write.csv2(ResumeAnomalie,file=paste0(params$ANOMALIE,"ResumeAnomalie.csv"))
+
+
+## Correction des anomalies
+
+Base_Sinistre_Analyse_prov=Base_Sinistre_Analyse
+Base_Sinistre_Analyse=correction_anomalie(Base_Sinistre_Analyse_prov)
+
+
+ saveRDS(Base_Sinistre_Analyse, paste0(params$RESULTAT,"Base_SIN_RC_Auto_Analyse.RDS"))
+ write.csv2(Base_Sinistre_Analyse,file =paste0(params$RESULTAT2,"Base_SIN_RC_Auto_Analyse.csv"))
+
+rm(Base_Sinistre_Analyse_prov)
+
+
+
+```
+
+## 04-C Récupération des informations de risques dans la BASE DE SINISTRE
+
+```{r}
+
+if (!exists("Base_Sinistre_Analyse"))
+{
+   Base_Sinistre_Analyse=  readRDS( paste0(params$RESULTAT2,"Base_SIN_RC_Auto_Analyse.RDS"))
+}
+  
+if (!exists("Base_risque"))
+{
+ Base_risque=readRDS( paste0(params$RESULTAT2,"Base_risque.RDS"))
+}
+  
+
+  
+by_Variables=c("CODEZONE","TYPEMOTE","PUISVEHICAT","Id_RISQUE","DATE_MEC","POIDVEHI2")
+
+ 
+Base_risque_ref=Base_risque[!duplicated(Base_risque$Id_RISQUE),]
+
+start_time<-Sys.time()
+Base_Sinistre_Analyse_risque=Base_Sinistre_Analyse%>%dplyr::filter(!SANS_FLUX_NEW)
+Base_Sinistre_Analyse_risque=Base_Sinistre_Analyse_risque%>%dplyr::left_join(dplyr::select(Base_risque_ref,by_Variables) ,c("Id_RISQUE"="Id_RISQUE"))
+
+end_time <-Sys.time()
+print(end_time-start_time)
+
+summary(dplyr::select(Base_Sinistre_Analyse_risque,by_Variables))
+#Base_Sinistre_Analyse_risque
+#Base_SIN_GAR_Auto_Analyse_risque$NBSIN=1
+```
+
+## 05A- Construction de la base de tarification v2
+
+```{r}
+
+if (!exists("PrimeAutorisque_pour_Exposition"))
+{
+PrimeAutorisque_pour_Exposition =readRDS( paste0(params$RESULTAT2,"Base_Prime_Travaux.RDS"))
+}
+  
+
+##Hendrick: Rappeler dans la table PrimeAutoRisque_ACQUI_Expo les infos sur les sinistres réalisés sur l'avenant X risques: Le nombre de sinistre, 0,1,2 et la somme des couts des sinistres
+
+Base_Sinistre_Analyse_risque_Aggreg=Base_Sinistre_Analyse_risque %>%
+  dplyr::group_by(Id_Police_Risque_Echeance) %>%
+  dplyr::summarise(
+    
+    NBSIN=sum(NBSIN,na.rm = TRUE),
+    NBSIN_CLOS=sum(NBSIN[CLOS==TRUE],na.rm = TRUE),
+    NBSIN_ID_ANOMALIE_RETRAIT=sum(NBSIN[ID_ANOMALIE_RETRAIT==FALSE],na.rm = TRUE),
+    NBSIN_NEW=sum(NBSIN_NEW,na.rm = TRUE),
+      NBSIN_CLOS_NEW=sum(NBSIN_NEW[CLOS==TRUE],na.rm = TRUE),
+    NBSIN_ATTRITION99=sum(NBSIN[ATTRITION99==TRUE],na.rm = TRUE),
+    NBSIN_ATTRITION975=sum(NBSIN[ATTRITION975==TRUE],na.rm = TRUE),
+    
+    CHARGENET_New=sum(CHARGENET_New,na.rm = TRUE),
+    CHARGENET_New_CLOS=sum(CHARGENET_New[CLOS==TRUE],na.rm = TRUE),
+    CHARGENET_New_ID_ANOMALIE_RETRAIT=sum(CHARGENET_New[ID_ANOMALIE_RETRAIT==FALSE],na.rm = TRUE),
+   # CHARGENET_New_SANS_FLUX_NEW=sum(CHARGENET_New[SANS_FLUX_NEW==FALSE],na.rm = TRUE),
+    CHARGENET_New_ATTRITION99=sum(CHARGENET_New[ATTRITION_New_99==TRUE],na.rm = TRUE),
+    CHARGENET_New_ATTRITION975=sum(CHARGENET_New[ATTRITION_New_975==TRUE],na.rm = TRUE),
+
+    SAPNET_New=sum(SAPNET_New,na.rm = TRUE),
+    SAPNET_New_CLOS=sum(SAPNET_New[CLOS==TRUE],na.rm = TRUE),
+    #SAPNET_New_ID_ANOMALIE_RETRAIT=sum(SAPNET_New[ID_ANOMALIE_RETRAIT==FALSE],na.rm = TRUE),
+#    SAPNET_New_SANS_FLUX_NEW=sum(SAPNET_New[SANS_FLUX_NEW==FALSE],na.rm = TRUE),
+    SAPNET_New_ATTRITION99=sum(SAPNET_New[ATTRITION_New_99==TRUE],na.rm = TRUE),
+    SAPNET_New_ATTRITION975=sum(SAPNET_New[ATTRITION_New_975==TRUE],na.rm = TRUE),
+    ANNEE=min(ANNEE)
+  )
+
+  
+
+#fusionner table_prime_1 et Base_Sinistre_Analyse_risque1
+
+PrimeAutoRisque_Sinistre = PrimeAutorisque_pour_Exposition %>% dplyr::left_join(
+  Base_Sinistre_Analyse_risque_Aggreg,
+  c("Id_Police_Risque_Echeance"="Id_Police_Risque_Echeance")
+)
+
+PrimeAutoRisque_Sinistre$ANNEE=ExtractionAnnee(PrimeAutoRisque_Sinistre$DATEEFFE)
+PrimeAutoRisque_Sinistre$AnneeMEC=ExtractionAnnee(PrimeAutoRisque_Sinistre$DATE_MEC)  
+
+# Identifiction des sinistres sans productions et enresitrement dans un fichier d'anomalie.
+
+Bool_SinistreSansProduction=  Base_Sinistre_Analyse_risque_Aggreg$Id_Police_Risque_Echeance %in% PrimeAutorisque_pour_Exposition$Id_Police_Risque_Echeance
+
+Bool_SinistreSansProduction_detaille= Base_Sinistre_Analyse_risque$Id_Police_Risque_Echeance %in% PrimeAutorisque_pour_Exposition$Id_Police_Risque_Echeance
+
+table(Base_Sinistre_Analyse_risque_Aggreg[!Bool_SinistreSansProduction,]$ANNEE)
+
+Sinistres_sans_production=Base_Sinistre_Analyse_risque[!Bool_SinistreSansProduction_detaille,]
+write.csv2(Sinistres_sans_production,file =paste0(params$ANOMALIE,"Sinistre_sans_Production.csv"))
+```
+
+## 05B- Analyse et Choix du périmètre d'analyse définitif après retrait des anomalies
+
+Identifier les lignes de polices qui présentent des anomalies de productions.
+
+```{r}
+#
+
+PrimeAutoRisque_Sinistre$AnomaliePeriodeEmission=(PrimeAutoRisque_Sinistre$AnneePolice<0.08  | PrimeAutoRisque_Sinistre$AnneePolice>1.0021)
+
+PrimeAutoRisque_Sinistre$AnomaliePrimeAnnualise=FALSE
+
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==400,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==400,]$PrimeMoy<30000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==400,]$PrimeMoy>700000)
+
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==405,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==405,]$PrimeMoy<3495 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==405,]$PrimeMoy>50000)
+
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==401,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==401,]$PrimeMoy<32000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==401,]$PrimeMoy>141000)
+
+
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==402,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==402,]$PrimeMoy<25000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==402,]$PrimeMoy>520000)
+    
+
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==403,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==403,]$PrimeMoy<25000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==403,]$PrimeMoy>650000)
+    
+
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==404,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==404,]$PrimeMoy<70000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==404,]$PrimeMoy>850000)
+
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==406,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==406,]$PrimeMoy<2000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==406,]$PrimeMoy>1000000)
+
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==407,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==407,]$PrimeMoy<20000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==407,]$PrimeMoy>400000)
+ 
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==408,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==408,]$PrimeMoy<19000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==408,]$PrimeMoy>1300000)
+ 
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==409,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==409,]$PrimeMoy<19000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==409,]$PrimeMoy>130000)
+ 
+ 
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==410,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==410,]$PrimeMoy<10000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==410,]$PrimeMoy>300000)
+ 
+PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==412,]$AnomaliePrimeAnnualise=
+(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==412,]$PrimeMoy<20000 | PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ==412,]$PrimeMoy>141000)
+ 
+
+## Limitation des années.
+PrimeAutoRisque_Sinistre$AnneeHorsPerimetre = (PrimeAutoRisque_Sinistre$ANNEE<2003|PrimeAutoRisque_Sinistre$ANNEE>2019)
+
+PrimeAutoRisque_Sinistre$AnneeMECValide=(PrimeAutoRisque_Sinistre$AnneeMEC>1977|PrimeAutoRisque_Sinistre$AnneeMEC>2020)
+
+
+quantile(PrimeAutoRisque_Sinistre[PrimeAutoRisque_Sinistre$CATERISQ=="Inconnu",]$PrimeMoy, 0.01*c(1:100), na.rm=TRUE)
+
+table(PrimeAutoRisque_Sinistre$AnomaliePrimeAnnualise,PrimeAutoRisque_Sinistre$AnomaliePeriodeEmission)
+
+NBsinAgreg= by(PrimeAutoRisque_Sinistre$NBSIN,PrimeAutoRisque_Sinistre[,c("AnomaliePrimeAnnualise","AnomaliePeriodeEmission")],SumDouble,na.rm=TRUE)
+
+
+NBsinAgregNew= by(PrimeAutoRisque_Sinistre$NBSIN_NEW,PrimeAutoRisque_Sinistre[,c("AnomaliePrimeAnnualise","AnomaliePeriodeEmission")],SumDouble,na.rm=TRUE)
+
+ExpositionAgreg= by(PrimeAutoRisque_Sinistre$AnneePolice,PrimeAutoRisque_Sinistre[,c("AnomaliePrimeAnnualise","AnomaliePeriodeEmission")],SumDouble,na.rm=TRUE)
+
+FreqAgreg= NBsinAgreg/ExpositionAgreg 
+FreqAgregNew= NBsinAgregNew/ExpositionAgreg 
+
+sum(NBsinAgreg)/sum(ExpositionAgreg)
+sum(NBsinAgregNew)/sum(ExpositionAgreg)
+
+table(PrimeAutoRisque_Sinistre$NBSIN)
+table(PrimeAutoRisque_Sinistre[!PrimeAutoRisque_Sinistre$AnomaliePeriodeEmission & !PrimeAutoRisque_Sinistre$AnomaliePrimeAnnualise,]$NBSIN_NEW)
+
+
+# PrimeAutoRisque_Sinistre%>%dplyr::filter(NBSIN_SANS_FLUX_NEW>5)%>%View()
+# 
+# TT=Base_Sinistre_Analyse%>%dplyr::filter(Id_Police_Risque_Echeance=="<ID_POLICE>")
+# TTP=PrimeAutoRisque_Sinistre%>%dplyr::filter(Id_Police_Risque_Echeance=="<ID_POLICE>")
+
+
+####### Filtre pour construction de bAse définitie
+
+FinMainTime=Sys.time()
+print(FinMainTime-MainTime)
+
+```
+
+## 06A -Construction de la base d'analyse principale
+
+```{r}
+
+#Prime
+if(exists("PrimeAutoRisque_Sinistre_VF")){rm(PrimeAutoRisque_Sinistre_VF)}
+
+PrimeAutoRisque_Sinistre_VF=PrimeAutoRisque_Sinistre%>% dplyr::filter(AnomaliePrimeAnnualise==FALSE,AnomaliePeriodeEmission==FALSE,AnneeHorsPerimetre==FALSE)
+
+# Sinistres Détaillés Equivalents
+
+Bool_sinistreDetaille_Analyse=Base_Sinistre_Analyse_risque$Id_Police_Risque_Echeance %in% PrimeAutoRisque_Sinistre_VF$Id_Police_Risque_Echeance
+
+if(exists("Base_sinistre_VF")){rm(Base_sinistre_VF)}
+Base_sinistre_VF= Base_Sinistre_Analyse_risque%>%dplyr::filter(Bool_sinistreDetaille_Analyse==TRUE, SANS_FLUX_NEW==FALSE)
+
+
+## Vérification de l'adéquation entre les deux tables. 
+SumDouble(PrimeAutoRisque_Sinistre_VF$CHARGENET_New)/SumDouble(Base_sinistre_VF$CHARGENET_New)
+
+
+
+if(exists("PrimeAutoRisque")){rm(PrimeAutoRisque2)}
+if(exists("PrimeAutoRisque")){rm(Base_Sinistre_Auto)}
+if(exists("PrimeAutoRisque")){rm(Base_Sinistre_Analyse)}
+if(exists("PrimeAutoRisque")){rm(Base_Sinistre_risque)}
+if(exists("PrimeAutoRisque")){rm(Base_risque)}
+
+# Ajout compléemntaire de variable ###
+PrimeAutoRisque_Sinistre_VF$NBSIN_NEW[is.na(PrimeAutoRisque_Sinistre_VF$NBSIN_NEW)]=0
+PrimeAutoRisque_Sinistre_VF$classeNBSIN=as.factor(PrimeAutoRisque_Sinistre_VF$NBSIN_NEW)
+  # Existance ou non de sinistre
+PrimeAutoRisque_Sinistre_VF$IsSinistre = ifelse(PrimeAutoRisque_Sinistre_VF$NBSIN_NEW==0,FALSE,TRUE)*1
+
+  #
+PrimeAutoRisque_Sinistre_VF$IsSinistrePoids=PrimeAutoRisque_Sinistre_VF$IsSinistre*PrimeAutoRisque_Sinistre_VF$AnneePolice
+   PrimeAutoRisque_Sinistre_VF$NBSINPoids=PrimeAutoRisque_Sinistre_VF$NBSIN_NEW*PrimeAutoRisque_Sinistre_VF$AnneePolice
+  PrimeAutoRisque_Sinistre_VF$FreqIndiv=PrimeAutoRisque_Sinistre_VF$NBSIN_NEW/PrimeAutoRisque_Sinistre_VF$AnneePolice   
+  
+  PrimeAutoRisque_Sinistre_VF$AGEVEHICULE=PrimeAutoRisque_Sinistre_VF$ANNEE-PrimeAutoRisque_Sinistre_VF$AnneeMEC+1
+
+  PrimeAutoRisque_Sinistre_VF$BurningCostIndiv=PrimeAutoRisque_Sinistre_VF$CHARGENET_New_ATTRITION975/PrimeAutoRisque_Sinistre_VF$AnneePolice
+  PrimeAutoRisque_Sinistre_VF$BurningCostIndiv[is.na( PrimeAutoRisque_Sinistre_VF$BurningCostIndiv)]=0
+########
+
+
+
+## Enregistrement
+ saveRDS(PrimeAutoRisque_Sinistre_VF, paste0(params$RESULTAT,"PrimeAutoRisque_Sinistre_VF.RDS"))
+  saveRDS(Base_sinistre_VF, paste0(params$RESULTAT,"Base_sinistre_VF.RDS"))
+
+
+```
+
+## 06B Construction des autres bases d'analyses
+
+```{r}
+# 1-Base_Detaillee_Qualifie correspond à la base finale dans laquelle on a rétiré les lignes qui présentennt 'Inconnu' pour certaines modalités: l'unité est un avenant et un risque.
+# 1-A : Base_Detaillee_Modelisation qui correspond à la base finale dans laquelle on a rétiré les catégories de risques minoritaires dont la fréquence mésurée n'est pas significative.
+
+# 1-B Base_Detaillee_Modelisation2 Significativité de la fréquence suivant les zones géographiques sur lesqueles les sélections de CATERISQn sont signficatives
+
+# 2- Aggreg_Base est la base agrégée suivant les principales variables tarifaires.
+
+# 3- Aggreg_risque est la base agrégée par véhicule sur la période du risque en portefeuille.
+
+# 4- Base_Detaillee_Qualifie_40112 correspond à la base détaillée d'analyse restrainte aux catégorie de risque 401 et 412
+
+# 5- Aggreg_risque_40112 est une restriction de Aggreg_risque sur les classes de risque 401 et 412
+
+# 6- Base_Detaillee_Qualifie_40112_MEC correpond à la base détaillée avec sur les classes de risques 401 et 412 et l'année de mise en circulation valide.
+
+# Aggregation des bases suivants les principaux indicateurs: Freq,CM, Burning cost, SP
+
+if (!exists("PrimeAutoRisque_Sinistre_VF"))
+{
+PrimeAutoRisque_Sinistre_VF =readRDS( paste0(params$RESULTAT,"PrimeAutoRisque_Sinistre_VF.RDS"))
+}
+  
+if (!exists("Base_Detaillee_Qualifie"))
+{
+Base_Detaillee_Qualifie=PrimeAutoRisque_Sinistre_VF%>%
+  dplyr::filter(CODEZONE!="Inconnu",!(PUISVEHICAT %in% c("0","Inconnu")), TYPEMOTE!="Inconnu",  !(CATERISQ %in% c("400","Inconnu")))
+
+  }
+
+## 
+
+{
+Aggreg_Base<-Base_Detaillee_Qualifie%>%
+  dplyr::group_by(ANNEE,CODEZONE,TYPEMOTE,CATERISQ,PUISVEHICAT)%>%
+  dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   PrimeMoy_1=Prime/AnneePolice,
+                   NBSIN=SumDouble(NBSIN_NEW),
+                   NBSIN_CLOS=SumDouble(NBSIN_CLOS_NEW),
+                   Freq=NBSIN/AnneePolice,
+                   Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttri = CoutMoyenAttri*Freq,
+                   SP_Attri=Charge_Attri/Prime,
+                   SP = Charge/Prime)
+
+   Aggreg_Base$BurningCostAttri[is.na(Aggreg_Base$BurningCostAttri)]=0
+   Aggreg_Base$SP_Attri[is.na(Aggreg_Base$SP_Attri)]=0
+  
+write.csv2(Aggreg_Base,file =paste0(params$RESULTAT,"Aggreg_Base.csv"))
+  saveRDS(Aggreg_Base, paste0(params$RESULTAT,"Aggreg_Base.RDS"))
+
+}
+#Aggreg_Base=  readRDS( paste0(params$RESULTAT,"Aggreg_Base.RDS"))
+
+# Agregation des bases suivant les risques individuels avec pour objectif de renforcer l'idée que quelques risques ont une une fréquence supérieures à la freq moyenne.
+{
+Aggreg_risque=Base_Detaillee_Qualifie %>%
+  dplyr::group_by(Id_RISQUE) %>%
+  dplyr::summarise(
+    
+                    Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   PrimeMoy_1=Prime/AnneePolice,
+                   NBSIN=SumDouble(NBSIN_NEW),
+                     NBSIN_CLOS=SumDouble(NBSIN_CLOS_NEW),
+                   Freq=NBSIN/AnneePolice,
+                   Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttri = CoutMoyenAttri*Freq,
+                    SP_Attri=Charge_Attri/Prime,
+
+                #   ANNEE=min(ANNEE),
+                   CODEZONE=first(CODEZONE),
+                   CATERISQ = first(CATERISQ),
+                   TYPEMOTE = first(TYPEMOTE),
+                    PUISVEHICAT = first(PUISVEHICAT),
+                DATEEFFE=min(DATEEFFE),
+                DATEECHE=max(DATEECHE)#,
+              #  DATE_MEC=min(DATE_MEC)
+          
+ 
+   
+  )
+     Aggreg_risque$BurningCostAttri[is.na(Aggreg_risque$BurningCostAttri)]=0
+   Aggreg_risque$SP_Attri[is.na(Aggreg_risque$SP_Attri)]=0
+   
+Aggreg_risque$IsSinistre =  ifelse(Aggreg_risque$NBSIN==0,FALSE,TRUE)*1
+  saveRDS(Aggreg_risque, paste0(params$RESULTAT,"Aggreg_risque.RDS"))
+
+AgggregNbSinistre=Aggreg_risque%>%
+    dplyr::group_by(IsSinistre) %>%
+   dplyr::summarise(
+                        NBSIN=SumDouble(NBSIN),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   Freq=NBSIN/AnneePolice
+   )
+
+}
+
+
+#Construction de la base de données réduite aux catégories de risques qui ont un nombre d'anné police supérieur & 100%
+
+Base_Detaillee_Modelisation <- Base_Detaillee_Qualifie%>% dplyr::filter(CATERISQ %in% c("401","402","403","405","408","409","410","412") )
+  
+Aggreg_Base_Modelisation<-Aggreg_Base%>%dplyr::filter(CATERISQ %in% c("401","402","403","405","408","409","410","412") )
+
+Base_Detaillee_Modelisation$CATERISQ=as.factor(as.character(Base_Detaillee_Modelisation$CATERISQ))
+Base_Detaillee_Modelisation$CATERISQ<-ordered(Base_Detaillee_Modelisation$CATERISQ,levels=c("401","402","403","405","408", "409","410","412"))
+
+#Significativité de la fréquence suivant les zones géographique sur lesqueles les sélections de CATERISQn sont signficatives
+Base_Detaillee_Modelisation2<-Base_Detaillee_Modelisation%>%filter(!(CATERISQ %in% c(408,409,410) & CODEZONE %in% c(2,3)))
+#Aggreg_Zone_usage2<-Aggreg_Zone_usage%>%filter(!(CATERISQ %in% c(408,409,410) & CODEZONE %in% c(2,3)))
+Aggreg_Base_Modelisation2<-Aggreg_Base_Modelisation%>%filter(!(CATERISQ %in% c(408,409,410) & CODEZONE %in% c(2,3)))
+
+## Extraction des catégories de risques 401 et 412 & ajout de la variable classe de risques.
+{Base_Detaillee_Qualifie_40112 = Base_Detaillee_Qualifie %>% dplyr::filter(CATERISQ %in% c(401,412))
+Base_Detaillee_Qualifie_40112$Niveau=NA
+
+# création des groupes de risques en croisant la Puissance et le Type d'éssence
+Base_Detaillee_Qualifie_40112=within(Base_Detaillee_Qualifie_40112,
+       {
+         Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('1')]=1
+        Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('2','3','4')]=2
+               Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('5','6')]=3
+                        Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('7','8')]=4
+                                Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('9','10','11','12 et plus')]=5
+            
+                                     Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('1','2')]=1
+        Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('3','4','5','6')]=2
+               Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('7','8','9')]=3
+                        Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('10','11')]=4
+                                Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('12 et plus')]=5                           
+       })
+
+# Prise en compte de la zone dans la classe de risques.
+  Base_Detaillee_Qualifie_40112$NiveauZone=NA
+  # recodification des zones
+  Base_Detaillee_Qualifie_40112=within(Base_Detaillee_Qualifie_40112,
+                  {
+                    NiveauZone[CODEZONE %in% '1' ]=3
+                     NiveauZone[CODEZONE %in% '2' ]=2
+                        NiveauZone[CODEZONE %in% '3' ]=1
+       })
+Base_Detaillee_Qualifie_40112$ClasseRisque= NA
+Base_Detaillee_Qualifie_40112$ClasseRisque= 3*(Base_Detaillee_Qualifie_40112$Niveau-1)+Base_Detaillee_Qualifie_40112$NiveauZone
+
+
+Base_Detaillee_Qualifie_40112$AnneeMEC[is.na(Base_Detaillee_Qualifie_40112$AnneeMEC)]=1900
+
+Base_Detaillee_Qualifie_40112$AnneeMECValide=(Base_Detaillee_Qualifie_40112$AnneeMEC>1977&Base_Detaillee_Qualifie_40112$AnneeMEC<2020&Base_Detaillee_Qualifie_40112$AGEVEHICULE>0)
+
+  saveRDS(Base_Detaillee_Qualifie_40112, paste0(params$RESULTAT,"Base_Detaillee_Qualifie_40112.RDS"))
+  
+
+}
+
+if (!exists("Base_Detaillee_Qualifie_40112"))
+{
+Base_Detaillee_Qualifie_40112 =readRDS( paste0(params$RESULTAT,"Base_Detaillee_Qualifie_40112.RDS"))
+}
+   
+ # Construction de l'agregation de 401_12 au niveau risques
+{
+Aggreg_risque_40112=Base_Detaillee_Qualifie_40112 %>%
+  dplyr::group_by(Id_RISQUE) %>%
+  dplyr::summarise(
+    
+                    Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   PrimeMoy_1=Prime/AnneePolice,
+                   NBSIN=SumDouble(NBSIN_NEW),
+                  NBSIN_CLOS=SumDouble(NBSIN_CLOS_NEW),
+                   Freq=NBSIN/AnneePolice,
+                   Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttri = CoutMoyenAttri*Freq,
+                   SP_Attri=Charge_Attri/Prime,
+                #   ANNEE=min(ANNEE),
+                   CODEZONE=first(CODEZONE),
+                   CATERISQ = first(CATERISQ),
+                   TYPEMOTE = first(TYPEMOTE),
+                    PUISVEHICAT = first(PUISVEHICAT),
+                DATEEFFE=min(DATEEFFE),
+                DATEECHE=max(DATEECHE),
+                ClasseRisque=first(ClasseRisque)
+  )
+Aggreg_risque_40112$IsSinistre =  ifelse(Aggreg_risque_40112$NBSIN==0,FALSE,TRUE)*1
+   Aggreg_risque_40112$BurningCostAttri[is.na(Aggreg_risque_40112$BurningCostAttri)]=0
+   Aggreg_risque_40112$SP_Attri[is.na(Aggreg_risque_40112$SP_Attri)]=0
+   
+  saveRDS(Aggreg_risque_40112, paste0(params$RESULTAT,"Aggreg_risque_40112.RDS"))
+
+  
+}
+
+## Agregation par classe de risques
+{
+Aggreg_Base_40112<-Base_Detaillee_Qualifie_40112%>%dplyr::filter(!is.na(ClasseRisque), ClasseRisque!=0)%>%
+  dplyr::group_by(ClasseRisque,CODEZONE,Niveau,CATERISQ,TYPEMOTE,PUISVEHICAT)%>%
+   dplyr::summarise(
+                     
+                 #   Lib=paste0("Zone ",CODEZONE, " Niveau",Niveau)  
+       
+       Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                    FrequenceMoy= wtd.mean(FreqIndiv,AnneePolice),
+                  FrequenceVarIntra= wtd.var(FreqIndiv,AnneePolice),
+              BCMoy= wtd.mean(BurningCostIndiv,AnneePolice),
+                  BCVarIntra= wtd.var(BurningCostIndiv,AnneePolice),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   PrimeMoy_1=Prime/AnneePolice,
+                   NBSIN=SumDouble(NBSIN_NEW),
+                   NBSIN_CLOS=SumDouble(NBSIN_CLOS_NEW),
+                   Freq=NBSIN/AnneePolice,
+                   Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttri = CoutMoyenAttri*Freq,
+                   SP_Attri=Charge_Attri/Prime,
+                   SP = Charge/Prime
+                    )
+  
+ 
+    Aggreg_Base_40112$BurningCostAttri[is.na(Aggreg_Base_40112$BurningCostAttri)]=0
+   Aggreg_Base_40112$SP_Attri[is.na(Aggreg_Base_40112$SP_Attri)]=0
+Aggreg_Base_40112$Proportion=Aggreg_Base_40112$AnneePolice/SumDouble(Aggreg_Base_40112$AnneePolice) 
+
+ write.csv2(Aggreg_Base_40112,file =paste0(params$RESULTAT,"Aggreg_Base_40112.csv"))
+  saveRDS(Aggreg_Base_40112, paste0(params$RESULTAT,"Aggreg_Base_401122.RDS"))
+
+}
+
+
+## identification des polices à sursinistralité
+{
+#  Aggreg_Base=  readRDS( paste0(params$RESULTAT,"Aggreg_Base.RDS"))
+
+ # Base_Analyse_risque_Aggreg$Id_RISQUE
+Aggreg_risque$CNBSIN=as.factor(Aggreg_risque$NBSIN)
+
+  SuiviSinistraliteRisque<-Aggreg_risque%>%dplyr::group_by(CNBSIN)%>%
+  dplyr::summarise(
+   # Nombre = n(Id_RISQUE),
+    NombreUnique=n_distinct(Id_RISQUE),
+          Moyenne_WA_Freq=weighted.mean(Freq,AnneePolice, na.rm=TRUE),
+          Var_WA_Freq=wtd.var(Freq,AnneePolice, na.rm=TRUE),
+
+    AnneePolice=SumDouble(AnneePolice),
+    NBSIN=SumDouble(NBSIN),
+    Frequence=NBSIN/AnneePolice,
+    Prime=SumDouble(Prime),
+    Charge=SumDouble(Charge),
+                   Charge_Clos=SumDouble(Charge_Clos),
+                   Charge_Attri=SumDouble(Charge_Attri),
+     CoutMoyenAttri=  Charge_Attri/ NBSIN,  
+    SP_attri=Charge_Attri/Prime,
+    SP= Charge/Prime,
+    PrimeMoy=Prime/AnneePolice,
+    BurningCostAttri=  Frequence * CoutMoyenAttri
+   
+  )
+write.csv2(SuiviSinistraliteRisque,file =paste0(params$RESULTAT,"SuiviSinistraliteRisque.csv"))
+}
+
+### MEC comme variable supplémentaire
+Base_Detaillee_Qualifie_40112_MEC=Base_Detaillee_Qualifie_40112%>%dplyr::filter(AnneeMECValide,AGEVEHICULE>0)
+#Base_Detaillee_Qualifie_40112_MEC=Base_Detaillee_Qualifie_40112_MEC
+#Base_Detaillee_Qualifie_40112_MEC3=Base_Detaillee_Qualifie_40112_MEC2%>%dplyr::filter(AGEVEHICULE>0)
+
+#Base_Detaillee_Qualifie_40112_MEC=Base_Detaillee_Qualifie_40112_MEC3
+##### Limitations aux bases de données avec les classes de modélisations.
+
+
+##### Construction des variables TypeMoteur x Puissance de véhicule.
+
+# Classes tarifaires  de la categorie 401 ##
+{PrimeAutoRisque_Sinistre_401 = PrimeAutoRisque_Sinistre_VF %>% dplyr::filter(CATERISQ==401)
+PrimeAutoRisque_Sinistre_401$Niveau=NA
+
+# création des groupes de risques en croisant la Puissance et le Type d'éssence
+PrimeAutoRisque_Sinistre_401=within(PrimeAutoRisque_Sinistre_401,
+       {
+         Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('1')]=1
+        Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('2','3','4')]=2
+               Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('5','6')]=3
+                        Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('7','8')]=4
+                                Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('9','10','11','12 et plus')]=5
+            
+                                     Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('1','2')]=1
+        Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('3','4','5','6')]=2
+               Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('7','8','9')]=3
+                        Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('10','11')]=4
+                                Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('12 et plus')]=5                           
+       })
+
+# Prise en compte de la zone dans la classe de risques.
+  PrimeAutoRisque_Sinistre_401$NiveauZone=NA
+  # recodification des zones
+  PrimeAutoRisque_Sinistre_401=within(PrimeAutoRisque_Sinistre_401,
+                  {
+                    NiveauZone[CODEZONE %in% '1' ]=3
+                     NiveauZone[CODEZONE %in% '2' ]=2
+                        NiveauZone[CODEZONE %in% '3' ]=1
+       })
+PrimeAutoRisque_Sinistre_401$ClasseRisque= NA
+PrimeAutoRisque_Sinistre_401$ClasseRisque= 3*(PrimeAutoRisque_Sinistre_401$Niveau-1)+PrimeAutoRisque_Sinistre_401$NiveauZone
+
+PrimeAutoRisque_Sinistre_401$IsSinistrePoids=PrimeAutoRisque_Sinistre_401$IsSinistre*PrimeAutoRisque_Sinistre_401$AnneePolice
+   PrimeAutoRisque_Sinistre_401$NBSINPoids=PrimeAutoRisque_Sinistre_401$NBSIN_NEW*PrimeAutoRisque_Sinistre_401$AnneePolice
+  PrimeAutoRisque_Sinistre_401$FreqIndiv=PrimeAutoRisque_Sinistre_401$NBSIN_NEW/PrimeAutoRisque_Sinistre_401$AnneePolice   
+}
+```
+
+## 06C Statistiques de références
+
+```{r}
+ValeursReference=list()
+## Sur Prime Détaillée totale.
+  FrequenceMoy_Detaillee= wtd.mean(Base_Detaillee_Qualifie$FreqIndiv,Base_Detaillee_Qualifie$AnneePolice)
+  VarFrequenceMoy_Detaillee= wtd.var(Base_Detaillee_Qualifie$FreqIndiv,Base_Detaillee_Qualifie$AnneePolice)
+  
+    BCMoy_Detaillee= wtd.mean(Base_Detaillee_Qualifie$BurningCostIndiv,Base_Detaillee_Qualifie$AnneePolice,normwt=FALSE,na.rm = TRUE)
+    
+ValeursReference$FrequenceMoy_Detaillee=FrequenceMoy_Detaillee
+ValeursReference$VarFrequenceMoy_Detaillee=VarFrequenceMoy_Detaillee
+ValeursReference$BCMoy_Detaillee=BCMoy_Detaillee
+
+ValeursReference$NbreMoyDetaille= wtd.mean(Base_Detaillee_Qualifie$NBSIN_NEW,Base_Detaillee_Qualifie$AnneePolice)
+  ValeursReference$VarNbreMoyDetaille=  wtd.var(Base_Detaillee_Qualifie$NBSIN_NEW,Base_Detaillee_Qualifie$AnneePolice)
+
+  ValeursReference$SumSQTotaleDetaille=SumDouble(Base_Detaillee_Qualifie$AnneePolice*((Base_Detaillee_Qualifie$FreqIndiv-ValeursReference$FrequenceMoy_Detaillee)^2))
+
+  ## Sur prime détaillée modelisation totale
+    ValeursReference$FrequenceMoy_Detaillee.modelisation= wtd.mean(Base_Detaillee_Modelisation$FreqIndiv,Base_Detaillee_Modelisation$AnneePolice)
+
+     ValeursReference$VarFrequenceMoy_Detaillee.modelisation= wtd.var(Base_Detaillee_Modelisation$FreqIndiv,Base_Detaillee_Modelisation$AnneePolice)
+ ValeursReference$SumSQTotaleDetaille.modelisation=SumDouble(Base_Detaillee_Modelisation$AnneePolice*((Base_Detaillee_Modelisation$FreqIndiv-ValeursReference$FrequenceMoy_Detaillee.modelisation)^2))
+ValeursReference$DD.modelisation=SumDouble(Base_Detaillee_Modelisation$AnneePolice)-1
+ 
+  ## Sur la Base Aggregé de Base
+  FrequenceMoy_Base= wtd.mean(Aggreg_Base$Freq,Aggreg_Base$AnneePolice,na.rm = TRUE)
+  VarFrequenceMoy_Base= wtd.var(Aggreg_Base$Freq,Aggreg_Base$AnneePolice,na.rm = TRUE)
+    BCMoy_Base= wtd.mean(Aggreg_Base$BurningCostAttri,Aggreg_Base$AnneePolice,na.rm = TRUE)
+
+    ValeursReference$FrequenceMoy_Base=FrequenceMoy_Base
+    ValeursReference$VarFrequenceMoy_Base=VarFrequenceMoy_Base
+    ValeursReference$BCMoy_Base=BCMoy_Base
+    
+    ValeursReference$NbreMoyBase=wtd.mean(Aggreg_Base$NBSIN,Aggreg_Base$AnneePolice,na.rm = TRUE)
+    
+  ## Sur la base agrégé de par risque
+   FrequenceMoy_Risque= wtd.mean(Aggreg_risque$Freq,Aggreg_risque$AnneePolice,na.rm = TRUE)
+  VarFrequenceMoy_Risque= wtd.var(Aggreg_risque$Freq,Aggreg_risque$AnneePolice,na.rm = TRUE)
+BCMoy_Risque= wtd.mean(Aggreg_risque$BurningCostAttri,Aggreg_risque$AnneePolice,na.rm = TRUE)
+
+ValeursReference$FrequenceMoy_Risque=FrequenceMoy_Risque
+ValeursReference$VarFrequenceMoy_Risque=VarFrequenceMoy_Risque
+ValeursReference$BCMoy_Risque=BCMoy_Risque
+
+  
+  ## Sur Prime Détaillée 40112
+  FrequenceMoy_Detaillee_40112= wtd.mean(Base_Detaillee_Qualifie_40112$FreqIndiv,Base_Detaillee_Qualifie_40112$AnneePolice)
+VarFrequenceMoy_Detaillee_40112= wtd.var(Base_Detaillee_Qualifie_40112$FreqIndiv,Base_Detaillee_Qualifie_40112$AnneePolice)
+
+ValeursReference$FrequenceMoy_Detaillee_40112=FrequenceMoy_Detaillee_40112
+ValeursReference$VarFrequenceMoy_Detaillee_40112=VarFrequenceMoy_Detaillee_40112
+
+  ## Sur la Base Aggregé 40112
+  FrequenceMoy_Base_40112= wtd.mean(Aggreg_Base_40112$Freq,Aggreg_Base_40112$AnneePolice,na.rm = TRUE)
+  VarFrequenceMoy_Base_40112= wtd.var(Aggreg_Base_40112$Freq,Aggreg_Base_40112$AnneePolice,na.rm = TRUE)
+
+  ValeursReference$FrequenceMoy_Base_40112=FrequenceMoy_Base_40112
+  ValeursReference$VarFrequenceMoy_Base_40112=VarFrequenceMoy_Base_40112
+  ## Sur la base agrégé de par risque 40112
+   FrequenceMoy_Risque_40112= wtd.mean(Aggreg_risque_40112$Freq,Aggreg_risque_40112$AnneePolice,na.rm = TRUE)
+  VarFrequenceMoy_Risque_40112= wtd.var(Aggreg_risque_40112$Freq,Aggreg_risque_40112$AnneePolice,na.rm = TRUE)
+
+  ValeursReference$FrequenceMoy_Risque_40112=FrequenceMoy_Risque_40112
+  ValeursReference$VarFrequenceMoy_Risque_40112=VarFrequenceMoy_Risque_40112
+  
+
+  FrequenceMoy_Base_40112_MEC= wtd.mean(Base_Detaillee_Qualifie_40112[Base_Detaillee_Qualifie_40112$AnneeMECValide,]$FreqIndiv,Base_Detaillee_Qualifie_40112[Base_Detaillee_Qualifie_40112$AnneeMECValide,]$AnneePolice,na.rm = TRUE)
+   VarFrequenceMoy_Base_40112_MEC=wtd.var(Base_Detaillee_Qualifie_40112[Base_Detaillee_Qualifie_40112$AnneeMECValide,]$FreqIndiv,Base_Detaillee_Qualifie_40112[Base_Detaillee_Qualifie_40112$AnneeMECValide,]$AnneePolice,na.rm = TRUE)
+
+   
+   ValeursReference$FrequenceMoy_Base_40112_MEC=FrequenceMoy_Base_40112_MEC
+   ValeursReference$VarFrequenceMoy_Base_40112_MEC=VarFrequenceMoy_Base_40112_MEC
+     
+#by(Aggreg_RC$PrimeMoy,Aggreg_RC$CATERISQ,summary)
+#by(PrimeAutorisque_pour_Exposition$PrimeMoy,PrimeAutorisque_pour_Exposition$CATERISQ,summary)
+
+#NBsinAgregNew= by(PrimeAutoRisque_Sinistre$NBSIN_NEW,PrimeAutoRisque_Sinistre[,c("AnomaliePrimeAnnualise","AnomaliePeriodeEmission")],SumDouble,na.rm=TRUE)
+
+#ExpositionAgreg= by(PrimeAutoRisque_Sinistre$AnneePolice,PrimeAutoRisque_Sinistre[,c("AnomaliePrimeAnnualise","AnomaliePeriodeEmission")],SumDouble,na.rm=TRUE)
+
+
+
+```
+
+## 06-D Construction des bases aggreg à qualifier
+
+```{r}
+
+# 1-Base_Detaillee_Qualifie correspond à la base finale dans laquelle on a rétiré les lignes qui présentennt 'Inconnu' pour certaines modalités: l'unité est un avenant et un risque.
+# 2- Aggreg_Base est la base agrégée suivant les principales variables tarifaires.
+
+#3- Aggreg_risque est la base agrégée par véhicule sur la période du risque en portefeuille.
+
+#4- Base_Detaillee_Qualifie_40112 correspond à la base détaillée d'analyse restrante au catégroeie de risque 401 et 412
+
+#5- Aggreg_risque_40112 est une restriction de Aggreg_risque sur les classes de risque 401 et 412
+
+# 6- Base_Detaillee_Qualifie_40112_MEC correpond à la base détaillée avec sur les classes de risques 401 et 412 et l'année de mise en circulation valide.
+
+
+#Aggreg_CATERISQ
+  Aggreg_CATERISQ$Lib=Vec_label_usage
+  Aggreg_CATERISQ$Proportion=Aggreg_CATERISQ$AnneePolice/SumDouble(Aggreg_CATERISQ$AnneePolice)
+ 
+  
+  
+##Aggreg_RC_CATERISQ
+
+Aggreg_RC_CATERISQ<-Base_Detaillee_Qualifie%>%
+   dplyr::filter(CATERISQ!="Inconnu")%>%
+   dplyr::group_by(CATERISQ)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                    AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                    PrimeMoy_1=Prime/AnneePolice,
+                    NBSIN=SumDouble(NBSIN_NEW),
+                    Freq=NBSIN/AnneePolice,
+                    Proportion=AnneePolice/TotalAnnePolice   )
+
+
+
+
+```
+
+## 07-A Analyse descriptive
+
+```{r}
+# présenter de façon structure, la repartition des expositions et des primes par rapports aux critères de tarification.
+
+#Filtre sur la table d'analys
+
+## repartition des critère de façon unilatégale
+#rm(PrimeAutorisque_pour_Exposition)
+#rm(PrimeAutorisque_pour_PrimeAcquise)
+#rm(PrimePourGraph)
+
+# Critère: Usage
+
+   PrimePourGraph= Base_Detaillee_Qualifie #%>%dplyr::filter(CATERISQ!='400',CATERISQ!='415') #CATERISQ != "Inconnu",PUISVEHICAT !="Inconnu",CODEZONE!="Inconnu",TYPEMOTE!="Inconnu"
+   PrimePourGraph$CATERISQ=as.factor(as.character(   PrimePourGraph$CATERISQ))
+   PrimePourGraph$PUISVEHICAT=as.factor(as.character(   PrimePourGraph$PUISVEHICAT))
+  PrimePourGraph$CODEZONE=as.factor(as.character(   PrimePourGraph$CODEZONE))
+  PrimePourGraph$TYPEMOTE=as.factor(as.character(   PrimePourGraph$TYPEMOTE))
+
+Freq_moy=ValeursReference$FrequenceMoy_Detaillee
+
+
+{
+  Vec_label_usage= c("Véhicule de tourisme, personnes physiques","Transport pour Propre Compte","Transport Public de Marchandises","Transport Public de Voyageurs","Deux Roues","Véhicules confiés pour la vente ou la répartation"," Véhicules à Usage d'Auto-Ecole", "Véhicules de Location", "Engins de Chantier", "Véhicules Spéciaux", "Véhicule de tourisme, personnes morales")
+ 
+summary(PrimePourGraph$CATERISQ)
+
+TotalAnnePolice=SumDouble(Base_Detaillee_Qualifie$AnneePolice)
+TotalPrime=SumDouble(PrimePourGraph$PRIMNETT)
+
+
+ Aggreg_CATERISQ%>%
+    ggplot()+
+      geom_col(aes(x=CATERISQ,y=Prime))
+      
+        # Enseignement: Surprésence des usages 401, 402, 405 et 412.
+  
+  # réparition des expositions
+    Aggreg_CATERISQ%>%
+    ggplot()+
+      geom_col(aes(y=CATERISQ,x=AnneePolice))+
+       scale_y_discrete(labels=Vec_label_usage)+
+       scale_fill_grey()+
+      geom_label(aes(x = AnneePolice, y =CATERISQ, label=scales::percent(Proportion,accuracy = 0.1)),hjust = -0.01 )+
+      xlab("Années police (exposition)")+ 
+     ylab("Usage")+
+  ggtitle("Repartition des volumes souscrits par usage")
+  
+ggsave("Repartition_usage.png",device="png", path=params$RESULTAT)
+
+           
+      Aggreg_CATERISQ%>%
+    ggplot()+
+      geom_point(aes(x=Prime,y=AnneePolice,size=PrimeMoy_1, color=CATERISQ))
+ 
+   
+ # Volume et positionnement tarifaire.     
+ PrimePourGraph%>%dplyr::filter(CATERISQ!='400', CATERISQ != "Inconnu")%>%
+   ggplot()+
+   geom_jitter(aes(x=AnneePolice  ,y=PrimeMoy, color=CATERISQ))
+
+ # répartition des fréquences
+
+ ## répartition des primes moyennes
+  PrimePourGraph%>%#dplyr::filter(CATERISQ!='400', CATERISQ != "Inconnu")%>%
+   ggplot()+
+    geom_boxplot(aes(x=PrimeMoy, y=CATERISQ))+
+    scale_y_discrete(labels=Vec_label_usage)+
+      xlab("Prime annualisée")+ 
+     ylab("Usage")
+ # ggtitle("Repartition des volumes souscrit par catégorie d'usage")
+  ggsave("Boxplot_usage.png",device="png", path=params$RESULTAT)
+
+  ## La fréquence des sinistres 
+  Aggreg_RC_CATERISQ%>%
+    ggplot()+
+    geom_col(aes(x=CATERISQ, y=Freq))
+  
+  xmax=quantile(Aggreg_RC_CATERISQ$PrimeMoy_1,0.7)
+  
+  
+    Aggreg_CATERISQ%>%dplyr::filter(CATERISQ %in% c("401","402","403","405","408","409","410","412") )%>%
+    ggplot()+
+    geom_point(aes(x=PrimeMoy_1 ,  y=Freq, col=Lib))+
+ #  geom_text(aes(x=PrimeMoy_1 ,  y=Freq, label=Lib),nudge_y = 0.001)+
+           xlab("Prime annualisée moyenne")+
+       ylab("Fréquence")+
+      geom_hline(yintercept = ValeursReference$FrequenceMoy_Detaillee, color="grey")+
+      geom_text(y=ValeursReference$FrequenceMoy_Detaillee+0.002,x=xmax, label="Frequence moyenne", color ="grey")+
+      scale_y_continuous(labels = scales::percent_format(accuracy = 0.01))+
+      scale_color_discrete( name="Usage")
+      #guides(color=FALSE)
+       ggsave("Prime_Freq_Usage.png",device="png", path=params$RESULTAT)
+
+     Aggreg_RC_CATERISQ%>%
+    ggplot()+
+    geom_point(aes(  x=Freq, y=CATERISQ, ))+
+        geom_vline(xintercept = Freq_moy, color="grey")+
+             geom_text(x=Freq_moy+0.002,y='410', label="Frequence du moyenne", color ="grey")+
+          scale_x_continuous(labels = scales::percent_format(accuracy = 0.01))+
+          scale_y_discrete(labels=Vec_label_usage)+
+          xlab("Fréquence")+
+         ylab("Usage")
+         ggsave("Freq_usage.png",device="png", path=params$RESULTAT)
+
+  #   +scale_color_gradient(low = "green", high = "red")
+     
+      write.csv2(Aggreg_RC_CATERISQ,file =paste0(params$RESULTAT,"Aggreg_RC_CATERISQ.csv"))
+
+}    
+     
+     ## Critère: Zone
+{    
+    
+ Vec_label_usage2= c("Véhicule de tourisme, personnes physiques","Transport pour Propre Compte","Transport Public de Marchandises","Deux Roues", "Véhicules de Location","Engins de Chantier","Véhicules Spéciaux", "Véhicule de tourisme, personnes morales")
+  xmax=mean(Aggreg_Zone_usage$PrimeMoy_1)
+  
+  summary(PrimePourGraph$CODEZONE)
+
+     
+  #    Aggreg_ZONE<-PrimePourGraph%>%
+  # dplyr::filter(CODEZONE!="Inconnu")%>%
+  # dplyr::group_by(CODEZONE)%>%
+  #  dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+  #                             AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+  #                                 PrimeMoy_1=Prime/AnneePolice,
+  #                             NBSIN=SumDouble(NBSIN_NEW),
+  #                             Freq=NBSIN/AnneePolice,
+  #                     Proportion=AnneePolice/TotalAnnePolice)
+  #    
+     # réparition des expositions
+  
+    Aggreg_Zone$Proportion=Aggreg_Zone$AnneePolice/SumDouble(Aggreg_Zone$AnneePolice)
+
+#     Aggreg_ZONE%>%
+#     ggplot()+
+#       geom_col(aes(x=CODEZONE,y=AnneePolice))+
+#     #   scale_y_discrete(labels=Vec_label_usage)+
+#        scale_fill_grey()+
+#     #  geom_label(aes(y = AnneePolice, x =CODEZONE, label=scales::percent(Proportion,accuracy = 0.1)),hjust = -0.01 )+
+#          xlab("Zone géographique")+
+#       ylab("Années police (exposition)")+ 
+#   ggtitle("Repartition des volumes souscrits par zone")
+#   
+# ggsave("Repartition_zone.png",device="png", path=params$RESULTAT)
+
+# réparition des expositions
+    Aggreg_Zone%>%
+    ggplot()+
+      geom_col(aes(y=CODEZONE,x=AnneePolice))+
+       scale_y_discrete()+
+       scale_fill_grey()+
+      geom_label(aes(x = AnneePolice, y =CODEZONE, label=scales::percent(Proportion,accuracy = 0.1)),hjust = -0.01 )+
+      xlab("Années police (exposition)")+ 
+     ylab("Zone Géographique")+
+  ggtitle("Repartition des volumes souscrits par zone géographique")
+  
+ggsave("Repartition_zone.png",device="png", path=params$RESULTAT)
+
+    
+ ## répartition des primes moyennes
+ #  PrimePourGraph%>%
+ #   ggplot()+
+ #    geom_boxplot(aes(y=PrimeMoy, x=CODEZONE))+
+ #      ylab("Prime annualisée")+ 
+ #     xlab("Zone géographique")
+ # # ggtitle("Repartition des volumes souscrit par catégorie d'usage")
+ #  ggsave("Boxplot_zone.png",device="png", path=params$RESULTAT)
+
+  
+  # zoom sur la relation entre les zones et catégorie de risques.
+levels(Aggreg_Zone_usage$CATERISQ)<-Vec_label_usage2
+Aggreg_Zone_usage%>%
+   ggplot()+
+      geom_col(aes(x=CODEZONE,y=AnneePolice,fill=CATERISQ),position = "fill")+
+    scale_fill_grey(name="Usage")+
+       ylab(" Années police (exposition): en proportion")+ 
+     xlab("Zone Géographique")
+         ggsave("Repartition_Usage_Zone.png",device="png", path=params$RESULTAT)
+
+         
+  # Base_Detaillee_Modelisation%>%
+  #       ggplot()+
+  #         geom_bar(aes(x=CODEZONE, fill=CATERISQ),position = "fill")+scale_fill_grey()
+  #               
+  #              Base_Detaillee_Modelisation%>%
+  #       ggplot()+
+  #         geom_bar(aes(x=CATERISQ, fill=CODEZONE),position = "fill")+scale_fill_grey()
+  #             
+  # Fréquence
+          Aggreg_Zone%>%
+    ggplot()+
+    geom_point(aes(x=PrimeMoy_1 ,  y=Freq, shape=CODEZONE))+
+  # geom_text(aes(x=PrimeMoy_1 ,  y=Freq, label=Lib),nudge_y = 0.001)+
+           xlab("Prime annualisée moyenne")+
+       ylab("Fréquence")+
+      geom_hline(yintercept = ValeursReference$FrequenceMoy_Detaillee.modelisation, color="grey")+
+      geom_text(y=ValeursReference$FrequenceMoy_Detaillee.modelisation,x=xmax, label="Frequence moyenne", color ="grey",vjust=-0.5)+
+      scale_y_continuous(labels = scales::percent_format(accuracy = 0.01))+
+      scale_x_continuous()+
+          scale_shape(name="zone géographique")
+     # scale_color_discrete(label=Vec_label_usage) +
+     # guides(color=FALSE)
+       ggsave("Prime_Freq_Zone.png",device="png", path=params$RESULTAT)
+
+       
+         ## faire un graphique par région....#
+        
+           Aggreg_Zone_usage%>%dplyr::filter( AnneePolice>1000 )%>%ggplot()+
+    geom_point(aes(x=PrimeMoy_1 ,  y=Freq, col=CATERISQ, shape=CODEZONE))+
+ #  geom_text(aes(x=PrimeMoy_1 ,  y=Freq, label=Lib),nudge_y = 0.001)+
+           xlab("Prime annualisée moyenne")+
+       ylab("Fréquence")+
+      geom_hline(yintercept = ValeursReference$FrequenceMoy_Detaillee.modelisation, color="grey")+
+      geom_text(y=ValeursReference$FrequenceMoy_Detaillee.modelisation+0.002,x=xmax, label="Frequence moyenne", color ="grey")+
+      scale_y_continuous(labels = scales::percent_format(accuracy = 0.01))+
+      scale_color_discrete( name="Usage")+
+      scale_shape(name="Zone Géographique")
+          
+      #guides(color=FALSE)
+       ggsave("Prime_Freq_Zone_Usage.png",device="png", path=params$RESULTAT)
+
+       
+       
+       
+    Aggreg_RC_ZONE%>%
+    ggplot()+
+    geom_point(aes(  x=CODEZONE, y=Freq))+
+        geom_hline(yintercept = Freq_moy, color="grey")+
+             geom_text(y=Freq_moy+0.002,x='2', label="Frequence du moyenne", color ="grey")+
+          scale_y_continuous(labels = scales::percent_format(accuracy = 0.01))+
+          scale_x_discrete()+
+          ylab("Fréquence")+
+         xlab("Zone géographique")
+         ggsave("Freq_zone.png",device="png", path=params$RESULTAT)
+
+  #   +scale_color_gradient(low = "green", high = "red")
+     
+      write.csv2(Aggreg_RC_ZONE,file =paste0(params$RESULTAT,"Aggreg_RC_ZONE.csv"))
+
+}  
+    
+  
+    ## Critère: Type Moteur
+{   
+  
+ ProvMOTPUIS=PrimePourGraph%>%dplyr::filter(CATERISQ %in% c("401","408","410","412"))
+
+  Vec_label_moteur= c("Diesel","Essence")
+  summary(PrimePourGraph$TYPEMOTE)
+
+     
+     Aggreg_RC_MOTEUR<-ProvMOTPUIS%>%
+  dplyr::group_by(TYPEMOTE)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy_1=Prime/AnneePolice,
+                              NBSIN=SumDouble(NBSIN_NEW),
+                              Freq=NBSIN/AnneePolice,
+                      Proportion=AnneePolice/TotalAnnePolice)
+Aggreg_RC_MOTEUR$lib=Vec_label_moteur
+   xmax=mean(Aggreg_RC_MOTEUR$PrimeMoy_1)
+   
+   
+       Aggreg_RC_MOTEUR%>%
+    ggplot()+
+      geom_col(aes(x=TYPEMOTE,y=Prime))
+       
+ # réparition des expositions
+    Aggreg_RC_MOTEUR%>%
+    ggplot()+
+      geom_col(aes(x=TYPEMOTE,y=AnneePolice))+
+     scale_x_discrete(labels=Vec_label_moteur)+
+       scale_fill_grey()+
+         xlab("Type de moteur")+
+      ylab("Années police (exposition)")+ 
+  ggtitle("Repartition des volumes souscrits par type de moteur")
+ggsave("Repartition_Moteur.png",device="png", path=params$RESULTAT)
+  
+       Aggreg_RC_MOTEUR%>%
+    ggplot()+
+      geom_point(aes(x=Prime,y=AnneePolice,size=PrimeMoy_1, color=TYPEMOTE))
+       
+      ## répartition des primes moyennes
+  ProvMOTPUIS%>%
+   ggplot()+
+    geom_boxplot(aes(y=PrimeMoy, x=TYPEMOTE))+
+         scale_x_discrete(labels=Vec_label_moteur)+
+      ylab("Prime annualisée")+ 
+     xlab("Zone géographique")
+ # ggtitle("Repartition des volumes souscrit par catégorie d'usage")
+  ggsave("Boxplot_Moteur.png",device="png", path=params$RESULTAT)
+
+ 
+         ## La fréquence des sinistres 
+    # Fréquence
+          Aggreg_RC_MOTEUR%>%
+    ggplot()+
+    geom_point(aes(x=PrimeMoy_1 ,  y=Freq, shape=TYPEMOTE))+
+  # geom_text(aes(x=PrimeMoy_1 ,  y=Freq, label=Lib),nudge_y = 0.001)+
+           xlab("Prime annualisée moyenne")+
+       ylab("Fréquence")+
+      geom_hline(yintercept = Freq_moy, color="grey")+
+      geom_text(y=Freq_moy,x=xmax, label="Frequence moyenne", color ="grey",vjust=-0.5)+
+      scale_y_continuous(labels = scales::percent_format(accuracy = 0.01))+
+      scale_x_continuous()+
+          scale_shape(name="Type de moteur",label=Vec_label_moteur)
+     # scale_color_discrete(label=Vec_label_usage) +
+     # guides(color=FALSE)
+       ggsave("Prime_Freq_Moteur.png",device="png", path=params$RESULTAT)
+
+  
+         write.csv2(Aggreg_RC_MOTEUR,file =paste0(params$RESULTAT,"Aggreg_RC_MOTEUR.csv"))
+
+ 
+}
+
+  ## Critère Puissance de véhicule.
+{      
+   summary(PrimePourGraph$PUISVEHICAT)
+    
+      summary(ProvMOTPUIS$PUISVEHICAT)
+                                 
+
+     Aggreg_RC_PUISSANCE<-ProvMOTPUIS%>%
+         dplyr::filter(PUISVEHICAT!='0')%>%
+  dplyr::group_by(PUISVEHICAT)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy_1=Prime/AnneePolice,
+                              NBSIN=SumDouble(NBSIN_NEW),
+                              Freq=NBSIN/AnneePolice,
+                      Proportion=AnneePolice/TotalAnnePolice)
+#Aggreg_RC_MOTEUR$lib=Vec_label_moteur
+   xmax=mean(Aggreg_RC_PUISSANCE$PrimeMoy_1)
+   
+   # réparition des expositions
+    Aggreg_RC_PUISSANCE%>%
+    ggplot()+
+      geom_col(aes(x=PUISVEHICAT,y=AnneePolice))+
+    # scale_x_discrete(labels=Vec_label_moteur)+
+       scale_fill_grey()+
+         xlab("Puissance fiscale")+
+      ylab("Années police (exposition)")+ 
+  ggtitle("Repartition des volumes souscrits par puissance fiscale")
+ggsave("Repartition_Puissance.png",device="png", path=params$RESULTAT)
+  
+   
+      ## répartition des primes moyennes
+  ProvMOTPUIS%>%
+   ggplot()+
+    geom_boxplot(aes(y=PrimeMoy, x=PUISVEHICAT))+
+         scale_x_discrete()+
+      ylab("Prime annualisée")+ 
+     xlab("Puissance fiscale du véhicule")
+ # ggtitle("Repartition des volumes souscrit par catégorie d'usage")
+  ggsave("Boxplot_puissance.png",device="png", path=params$RESULTAT)
+
+ 
+         ## La fréquence des sinistres 
+    # Fréquence
+          Aggreg_RC_PUISSANCE%>%
+    ggplot()+
+    geom_point(aes(x=PrimeMoy_1 ,  y=Freq, color=PUISVEHICAT))+
+  # geom_text(aes(x=PrimeMoy_1 ,  y=Freq, label=Lib),nudge_y = 0.001)+
+           xlab("Prime annualisée moyenne")+
+       ylab("Fréquence")+
+      geom_hline(yintercept = Freq_moy, color="grey")+
+      geom_text(y=Freq_moy,x=xmax, label="Frequence moyenne", color ="grey",vjust=-0.5)+
+      scale_y_continuous(labels = scales::percent_format(accuracy = 0.01))+
+      scale_x_continuous()+
+          scale_color_discrete(name="Puissance fiscaole")
+     # scale_color_discrete(label=Vec_label_usage) +
+     # guides(color=FALSE)
+       ggsave("Prime_Freq_Puissance.png",device="png", path=params$RESULTAT)
+
+ 
+       
+
+         write.csv2(Aggreg_RC_PUISSANCE,file =paste0(params$RESULTAT,"Aggreg_RC_Puissance.csv"))
+
+
+}         
+
+   ### Croisement Puissance x Moteur
+   ### réparition des expositions
+{
+# 
+#        Aggreg_RC_PUISMOT<-ProvMOTPUIS%>%
+#          dplyr::filter(PUISVEHICAT!='0')%>%
+#   dplyr::group_by(PUISVEHICAT,TYPEMOTE)%>%
+#    dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+#                               AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+#                                   PrimeMoy_1=Prime/AnneePolice,
+#                               NBSIN=SumDouble(NBSIN_NEW),
+#                               Freq=NBSIN/AnneePolice,
+#                       Proportion=AnneePolice/TotalAnnePolice)
+#        
+#        Aggreg_RC_PUISMOT$PUISVEHICAT<-ordered(   Aggreg_RC_PUISMOT$PUISVEHICAT,levels=c("0","1","2","3","4","5","6","7","8","9","10","11","12 et plus"))
+# #Aggreg_RC_MOTEUR$lib=Vec_label_moteur
+#    xmax=mean(Aggreg_RC_PUISMOT$PrimeMoy_1)
+#     # Aggreg_RC_PUISSANCE%>%
+#    # ggplot()+
+#    # geom_point(aes(color=PrimeMoy_1 ,  y=Freq, x=PUISVEHICAT))+scale_color_gradient(low = "green", high = "red")
+# #repartition
+#        Aggreg_RC_PUISMOT%>%
+#     ggplot()+
+#       geom_col(aes(x=PUISVEHICAT,y=AnneePolice,fill=TYPEMOTE))+
+#     # scale_x_discrete(labels=Vec_label_moteur)+
+#        scale_fill_grey(name="Type Moteur",label=Vec_label_moteur)+
+#          xlab("Puissance fiscale")+
+#       ylab("Années police (exposition)")+ 
+#   ggtitle("Repartition des volumes souscrits par puissance fiscale et type de moteur")
+# ggsave("Repartition_PuisMot.png",device="png", path=params$RESULTAT)
+  # 
+  #           Aggreg_RC_PUISMOT%>%
+  #   ggplot()+
+  #   geom_point(aes(x=PrimeMoy_1 ,  y=Freq, color=PUISVEHICAT,shape=TYPEMOTE))+
+  # # geom_text(aes(x=PrimeMoy_1 ,  y=Freq, label=Lib),nudge_y = 0.001)+
+  #          xlab("Prime annualisée moyenne")+
+  #      ylab("Fréquence")+
+  #     geom_hline(yintercept = Freq_moy, color="grey")+
+  #     geom_text(y=Freq_moy,x=xmax, label="Frequence moyenne", color ="grey",vjust=-0.5)+
+  #     scale_y_continuous(labels = scales::percent_format(accuracy = 0.01))+
+  #     scale_x_continuous()+
+  #         scale_color_discrete(name="Puissance fiscaole")+
+  #             scale_shape(name="Type moteur", label=Vec_label_moteur)
+  #    # scale_color_discrete(label=Vec_label_usage) +
+  #    # guides(color=FALSE)
+  #      ggsave("Prime_Freq_PuissanceMoteur.png",device="png", path=params$RESULTAT)
+  # 
+  #          write.csv2(Aggreg_RC_PUISMOT,file =paste0(params$RESULTAT,"Aggreg_RC_PUISMOT.csv"))
+  #          
+  #          
+           Aggreg_Base_40112$Niveau=as.factor(Aggreg_Base_40112$Niveau)
+  # réparition des expositions
+  TotalAnnePolice=SumDouble(Aggreg_Base_40112$AnneePolice)
+           Aggreg_Base_40112%>%dplyr::group_by(Niveau,TYPEMOTE)%>%
+             dplyr::summarise(#Prime=SumDouble(Prime,na.rm = TRUE),
+                              AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                                #  PrimeMoy_1=Prime/AnneePolice,
+                            #  NBSIN=SumDouble(NBSIN),
+                           #   Freq=NBSIN/AnneePolice,
+                      Proportion=AnneePolice/TotalAnnePolice)%>%
+    ggplot()+
+                 geom_col(aes(x=Niveau,y=AnneePolice,fill=TYPEMOTE),position="dodge")+
+       scale_y_discrete()+
+             scale_fill_grey(name="Type de moteur")+
+      geom_label(aes(y = AnneePolice, x =as.numeric(Niveau)-0.5*(TYPEMOTE=="D"), label=scales::percent(Proportion,accuracy = 0.1)),hjust = -0.01 )+
+      ylab("Années police (exposition)")+ 
+     xlab("Classe de risque Puissance de Véhicule x Moteur ")+
+  ggtitle("Repartition des volumes souscrits par Puissance de véhicule et de moteur")
+  
+ggsave("Repartition_puiss_moteur.png",device="png", path=params$RESULTAT)
+
+
+### Frequence en fonction de la puissance des véhicules et le type de moteur.
+
+xmax=SumDouble(Aggreg_Base_40112$Prime)/SumDouble(Aggreg_Base_40112$AnneePolice)
+  Aggreg_Base_40112%>%dplyr::group_by(Niveau,TYPEMOTE)%>%dplyr::filter(Niveau%in%c('2','3','4','5'))%>%
+             dplyr::summarise(#Prime=SumDouble(Prime,na.rm = TRUE),
+                              AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                                 PrimeMoy_1=SumDouble(Prime)/AnneePolice,
+                            #  NBSIN=SumDouble(NBSIN),
+                              Freq=SumDouble(NBSIN)/AnneePolice,
+                      Proportion=AnneePolice/TotalAnnePolice)%>%
+    ggplot()+
+    geom_point(aes(x=PrimeMoy_1 ,  y=Freq,color=Niveau,shape=TYPEMOTE))+
+  # geom_text(aes(x=PrimeMoy_1 ,  y=Freq, label=Lib),nudge_y = 0.001)+
+           xlab("Prime annualisée moyenne")+
+       ylab("Fréquence")+
+      geom_hline(yintercept = ValeursReference$FrequenceMoy_Detaillee_40112, color="grey")+
+      geom_text(y=ValeursReference$FrequenceMoy_Detaillee_40112,x=xmax, label="Frequence moyenne", color ="grey",vjust=-0.5)+
+      scale_y_continuous(labels = scales::percent_format(accuracy = 0.01))+
+      scale_x_continuous()+
+          scale_color_discrete(name="Niveau de puissance de véhicule")+
+              scale_shape(name="Type moteur", label=c("Diesel","Essence"))
+     # scale_color_discrete(label=Vec_label_usage) +
+     # guides(color=FALSE)
+       ggsave("Prime_Freq_PuissanceMoteur.png",device="png", path=params$RESULTAT)
+
+
+}  
+ 
+
+##Correlation
+### Existe t il des corrélations entre critères de tarification.
+
+{
+  # Zone avec les autres variables: pour expliquer pourquoi prime moyenne zone 2< Zone 3
+  
+   PrimeAutoRisque_Sinistre_VF%>%dplyr::filter(CATERISQ!='400', CATERISQ != "Inconnu",PUISVEHICAT !="Inconnu",CODEZONE!="Inconnu")%>%
+    ggplot()+
+    geom_bar(aes(x = CATERISQ, fill=CODEZONE))
+
+
+   ## Usage vs Zone
+   plot(PrimePourGraph$CATERISQ,PrimePourGraph$CODEZONE)
+  
+  chisq.test(table(PrimePourGraph$CATERISQ,PrimePourGraph$CODEZONE)) 
+    ## P value : 2.2 e-16. On rejette l'hypothese d independance
+   
+  ## Usage vs Moteur   
+   plot(PrimePourGraph$CATERISQ,PrimePourGraph$TYPEMOTE)
+  chisq.test(table(PrimePourGraph$CATERISQ,PrimePourGraph$TYPEMOTE))
+ 
+     ## P value : 2.2 e-16. On rejette l'hypothese d independance
+ 
+  
+  ## Moteur vs Zone.
+     plot(PrimePourGraph$TYPEMOTE,PrimePourGraph$CODEZONE)
+  chisq.test(table(PrimePourGraph$TYPEMOTE,PrimePourGraph$CODEZONE))
+
+      plot(PrimePourGraph$TYPEMOTE,PrimePourGraph$CODEZONE)
+      
+    
+      ###
+Aggreg_RC=PrimePourGraph%>%
+         dplyr::filter(PUISVEHICAT %in% c("12 et plus","10","9","11","8","1","0","7") , CATERISQ %in% c(401, 402, 405,412), )%>%
+  dplyr::group_by(CODEZONE,TYPEMOTE,CATERISQ,PUISVEHICAT)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy_1=Prime/AnneePolice,
+                              NBSIN=SumDouble(NBSIN_NEW),
+                              Freq=NBSIN/AnneePolice
+                       )
+
+ Aggreg_RC %>% dplyr::filter(Freq<0.15)%>%
+  ggplot()+
+      geom_point(aes(x = PrimeMoy_1, y =Freq, size=Prime,color=CATERISQ))
+    
+        Aggreg_RC %>% dplyr::filter(Freq<0.15)%>%
+          ggplot()+
+      geom_point(aes(x = PrimeMoy_1, y =Freq, size=Prime,color=CODEZONE))
+        
+               Aggreg_RC %>% dplyr::filter(Freq<0.15)%>%
+                 ggplot()+
+      geom_point(aes(x = PrimeMoy_1, y =Freq, size=Prime,color=PUISVEHICAT))
+               
+                       Aggreg_RC %>% dplyr::filter(Freq<0.15)%>%
+                         ggplot()+
+      geom_point(aes(x = PrimeMoy_1, y =Freq, size=Prime,color=TYPEMOTE))
+  }
+
+#
+#
+#
+Aggreg_RC_TYPEMOT=PrimeAutorisque_pour_Exposition %>% 
+ dplyr:: group_by(ANNEE,TYPEMOTE)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              Exposition= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy=Prime/Exposition)
+
+PrimeAutoRisque_Sinistre_VF%>%dplyr::filter(CATERISQ)%>%
+  ggplot()+
+  geom_point(aes(x=PRIMNETT,y=AnneePolice, color=CATERISQ,size=PrimeMoy, alpha=0.5))
+
+
+
+## 
+
+
+
+
+by(PrimeAutoRisque_Sinistre$PrimeMoy ,PrimeAutoRisque_Sinistre$CATERISQ, function(x) quantile(x, c(0.01*c(0:5),0.01*c(95:100)),na.rm = TRUE))
+
+quantile(PrimeAutoRisque_Sinistre$AnneePolice, c(0.01*c(0:5),0.01*c(95:100)),na.rm = TRUE)
+
+PrimeAutoRisque_Sinistre%>%
+  dplyr::filter(AnomaliePrimeAnnualise==FALSE,AnomaliePeriodeEmission==FALSE, CATERISQ!="Inconnu", TYPEMOTE!="Inconnu")%>%
+  ggplot()+
+  geom_point(aes(x=PrimeMoy, y=CATERISQ, color=PUISVEHICAT))+
+  scale_x_continuous()+
+    facet_grid(TYPEMOTE ~ .)
+
+
+
+PrimeAutoRisque_Sinistre%>%
+  dplyr::filter(AnomaliePrimeAnnualise==FALSE,AnomaliePeriodeEmission==FALSE, CATERISQ!="Inconnu", TYPEMOTE!="Inconnu")%>%
+  ggplot()+
+  geom_point(aes(x=PRIMNETT, y=CATERISQ, color=PUISVEHICAT))+
+  scale_x_continuous()+
+    facet_grid(TYPEMOTE ~ .)
+
+
+
+
+```
+
+## 07 B - Significativité statistique des critères de tarifications/Description 2
+
+```{r}
+
+
+# Test de la significativités des différentes variables tarifiaires. L'objectif étant de valider que suivant les modalités d'une variable tarifaires: les fréquence et BC attritionnels sont statistiquement différents de zero et les frequences et BC sont statistiquements différents les uns des autres/
+
+
+Base_Detaillee_Qualifie$CATERISQ=Base_Detaillee_Qualifie$CATERISQ2
+#rm(Base_Detaillee_Qualifie$CATERISQ2)
+
+# 07B - 1 Variable: CATERISQ.
+{## Volume significatif pour les estimations.
+      Base_Detaillee_Qualifie%>%group_by(CATERISQ)%>%
+          get_summary_stats(c(FreqIndiv), type = "mean_sd")
+     
+# Analyse de la dépendance via la base détaillée.  
+
+
+# Calcul des tests via la variable agrégées. 
+{
+Aggreg_CATERISQ<-Base_Detaillee_Qualifie%>%
+  dplyr::group_by(CATERISQ)%>%
+  dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                    FrequenceMoy= wtd.mean(FreqIndiv,AnneePolice),
+                  FrequenceVarIntra= wtd.var(FreqIndiv,AnneePolice),
+              BCMoy= wtd.mean(BurningCostIndiv,AnneePolice),
+                  BCVarIntra= wtd.var(BurningCostIndiv,AnneePolice),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   PrimeMoy_1=Prime/AnneePolice,
+                   NBSIN=SumDouble(NBSIN_NEW),
+                   NBSIN_CLOS=SumDouble(NBSIN_CLOS_NEW),
+                   Freq=NBSIN/AnneePolice,
+                   Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttri = CoutMoyenAttri*Freq,
+                   SP_Attri=Charge_Attri/Prime,
+                   SP = Charge/Prime)
+
+   Aggreg_CATERISQ$BurningCostAttri[is.na(Aggreg_CATERISQ$BurningCostAttri)]=0
+   Aggreg_CATERISQ$SP_Attri[is.na(Aggreg_CATERISQ$SP_Attri)]=0
+  
+write.csv2(Aggreg_CATERISQ,file =paste0(params$RESULTAT,"Aggreg_CATERISQ.csv"))
+  #saveRDS(Aggreg_Base, paste0(params$RESULTAT,"Aggreg_Base.RDS"))
+
+          }
+
+
+# Test 1: Base détaillée
+oneway.test( FreqIndiv~  CATERISQ, data=Base_Detaillee_Qualifie, var.equal = TRUE)
+  
+#test 2: base détaillée
+
+res_aov<-aov(FreqIndiv~  CATERISQ, data=Base_Detaillee_Qualifie)
+summary(res_aov)
+
+# test 3: base détaillée
+
+est.lm.Caterisq<-lm(FreqIndiv~  CATERISQ, data=Base_Detaillee_Qualifie)
+anova(est.lm.Caterisq)
+
+# test 4: base détaillée, estimation pondérée
+
+wtd.est.lm.Caterisq<-lm(FreqIndiv~  CATERISQ,data=Base_Detaillee_Modelisation, weights = AnneePolice)
+anova(wtd.est.lm.Caterisq.freq)
+
+# test 5: base détaillée, estimation, glm , pondérée
+
+wtd.est.glm.Caterisq<-glm(FreqIndiv~  CATERISQ, data=Base_Detaillee_Qualifie,family = gaussian(link = "identity") , weights = AnneePolice)
+summary(wtd.est.glm.Caterisq)
+anova(wtd.est.glm.Caterisq)
+
+# test 6 : base agrégée avec estimation lm sur base agrégée
+
+wtd.est.lm.Caterisq_agg<-lm(Freq~  CATERISQ, data=Aggreg_Base_Modelisation, weights = AnneePolice)
+summary(wtd.est.lm.Caterisq_agg)
+anova(wtd.est.lm.Caterisq_agg)
+
+# test sur la burning ocst
+wtd.est.lm.Caterisq.bc<-lm(BurningCostIndiv~  CATERISQ, data=Base_Detaillee_Qualifie, weights = AnneePolice)
+anova(wtd.est.lm.Caterisq.bc)
+}
+
+# 07B - 2 Variable: Zone
+    # Test sur la frequence.
+{
+#construction de la base aggrégée
+Aggreg_Zone<-Base_Detaillee_Modelisation%>%
+  dplyr::group_by(CODEZONE )%>%
+  dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                    FrequenceMoy= wtd.mean(FreqIndiv,AnneePolice),
+                  FrequenceVarIntra= wtd.var(FreqIndiv,AnneePolice),
+              BCMoy= wtd.mean(BurningCostIndiv,AnneePolice),
+                  BCVarIntra= wtd.var(BurningCostIndiv,AnneePolice),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   PrimeMoy_1=Prime/AnneePolice,
+                   NBSIN=SumDouble(NBSIN_NEW),
+                   NBSIN_CLOS=SumDouble(NBSIN_CLOS_NEW),
+                   Freq=NBSIN/AnneePolice,
+                   Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttri = CoutMoyenAttri*Freq,
+                   SP_Attri=Charge_Attri/Prime,
+                   SP = Charge/Prime)
+
+   Aggreg_Zone$BurningCostAttri[is.na(Aggreg_Zone$BurningCostAttri)]=0
+   Aggreg_Zone$SP_Attri[is.na(Aggreg_Zone$SP_Attri)]=0
+
+   write.csv2(Aggreg_Zone,file =paste0(params$RESULTAT,"Aggreg_Zone.csv"))
+
+wtd.est.lm.zone.freq<-lm(FreqIndiv~  CODEZONE, data=Base_Detaillee_Modelisation, weights = AnneePolice)
+anova(wtd.est.lm.zone.freq)
+
+    # test sur la burning ocst
+wtd.est.lm.zone.bc<-lm(BurningCostIndiv~  CODEZONE, data=Base_Detaillee_Qualifie, weights = AnneePolice)
+anova(wtd.est.lm.zone.bc)
+}
+#  07B - 3 Variable: Type Moteur
+   # Test sur la frequence.
+{wtd.est.lm.typemote.freq<-lm(FreqIndiv~  TYPEMOTE, data=Base_Detaillee_Modelisation, weights = AnneePolice)
+anova(wtd.est.lm.typemote.freq)
+
+    # test sur la burning ocst
+wtd.est.lm.typemote.bc<-lm(BurningCostIndiv~  TYPEMOTE, data=Base_Detaillee_Modelisation, weights = AnneePolice)
+anova(wtd.est.lm.typemote.bc)
+
+#  07B - 3 Variable: Type Puissance
+
+   # Test sur la frequence.
+wtd.est.lm.puis.freq<-lm(FreqIndiv~  PUISVEHICAT, data=Base_Detaillee_Modelisation[Base_Detaillee_Modelisation$CATERISQ %in% c(401,412) ,], weights = AnneePolice)
+anova(wtd.est.lm.puis.freq)
+
+    # test sur la burning ocst
+wtd.est.lm.puis.bc<-lm(BurningCostIndiv~  PUISVEHICAT, data=Base_Detaillee_Modelisation, weights = AnneePolice)
+anova(wtd.est.lm.puis.bc)
+
+  
+write.csv2(Aggreg_CATERISQ,file =paste0(params$RESULTAT,"Aggreg_CATERISQ.csv"))
+  #saveRDS(Aggreg_Base, paste0(params$RESULTAT,"Aggreg_Base.RDS"))
+
+}
+### Zone et Usage
+
+{Aggreg_Zone_usage<-Base_Detaillee_Modelisation%>%#filter(CATERISQ==412)%>%
+  dplyr::group_by(CODEZONE, CATERISQ )%>%
+  dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                    FrequenceMoy= wtd.mean(FreqIndiv,AnneePolice),
+                  FrequenceVarIntra= wtd.var(FreqIndiv,AnneePolice),
+              BCMoy= wtd.mean(BurningCostIndiv,AnneePolice),
+                  BCVarIntra= wtd.var(BurningCostIndiv,AnneePolice),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   PrimeMoy_1=Prime/AnneePolice,
+                   NBSIN=SumDouble(NBSIN_NEW),
+                   NBSIN_CLOS=SumDouble(NBSIN_CLOS_NEW),
+                   Freq=NBSIN/AnneePolice,
+                   Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttri = CoutMoyenAttri*Freq,
+                   SP_Attri=Charge_Attri/Prime,
+                   SP = Charge/Prime)
+
+write.csv2(Aggreg_Zone_usage,file =paste0(params$RESULTAT,"Aggreg_Zone_CATERISQ.csv"))
+
+
+wtd.est.lm.zone.CATERISQ.freq<-lm(FreqIndiv~  CODEZONE+ CATERISQ, data=Base_Detaillee_Modelisation, weights = AnneePolice)
+anova(wtd.est.lm.zone.CATERISQ.freq)
+
+
+wtd.est.lm.zone.2.freq<-lm(FreqIndiv~  CODEZONE, data=Base_Detaillee_Modelisation2, weights = AnneePolice)
+wtd.est.lm.zone.CATERISQ.2.freq<-lm(FreqIndiv~  CODEZONE+CATERISQ, data=Base_Detaillee_Modelisation2, weights = AnneePolice)
+
+wtd.est.lm.zone.CATERISQ.freq.agg<-lm(Freq~  CODEZONE+ CATERISQ, data=Aggreg_Base_Modelisation, weights = AnneePolice)
+wtd.est.lm.zone.CATERISQ.2.freq.agg<-lm(Freq~  CODEZONE+ CATERISQ, data=Aggreg_Base_Modelisation2, weights = AnneePolice)
+wtd.est.lm.zone.2.freq.agg<-lm(Freq~  CODEZONE, data=Aggreg_Base_Modelisation2, weights = AnneePolice)
+
+
+summary(lm(Freq~  CODEZONE, data=Aggreg_Base_Modelisation[Aggreg_Base_Modelisation$CATERISQ %in% c(401,402,403,412),], weights = AnneePolice))
+
+summary(lm(FreqIndiv~  CODEZONE, data=Base_Detaillee_Modelisation[Base_Detaillee_Modelisation$CATERISQ %in% c(405),], weights = AnneePolice))
+
+ 
+
+summary(lm(Freq~  CODEZONE, data=Aggreg_Base_Modelisation[Aggreg_Base_Modelisation$CATERISQ %in% c(401),], weights = AnneePolice))
+}
+# Type de moteur
+wtd.est.lm.moteur.freq<-lm(FreqIndiv~  TYPEMOTE, data=Base_Detaillee_Modelisation, weights = AnneePolice)
+anova(wtd.est.lm.moteur.freq)
+
+wtd.est.lm.moteur.Caterisq.freq<-lm(FreqIndiv~  TYPEMOTE+CATERISQ, data=Base_Detaillee_Modelisation, weights = AnneePolice)
+summary(wtd.est.lm.moteur.Caterisq.freq)
+
+## Type de moteur et puissance de véhicule###
+{
+Aggreg_Moteur_Puis<-Base_Detaillee_Qualifie_40112%>%#filter(CATERISQ==412)%>%
+  dplyr::group_by(TYPEMOTE, PUISVEHICAT, Niveau )%>%
+  dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                    FrequenceMoy= wtd.mean(FreqIndiv,AnneePolice),
+                  FrequenceVarIntra= wtd.var(FreqIndiv,AnneePolice),
+              BCMoy= wtd.mean(BurningCostIndiv,AnneePolice),
+                  BCVarIntra= wtd.var(BurningCostIndiv,AnneePolice),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   PrimeMoy_1=Prime/AnneePolice,
+                   NBSIN=SumDouble(NBSIN_NEW),
+                   NBSIN_CLOS=SumDouble(NBSIN_CLOS_NEW),
+                   Freq=NBSIN/AnneePolice,
+                   Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttri = CoutMoyenAttri*Freq,
+                   SP_Attri=Charge_Attri/Prime,
+                   SP = Charge/Prime)
+
+write.csv2(Aggreg_Moteur_Puis,file =paste0(params$RESULTAT,"Aggreg_Moteur_Puis.csv"))
+
+Aggreg_NiveauPuisMot<-Base_Detaillee_Qualifie_40112%>%#filter(CATERISQ==412)%>%
+  dplyr::group_by( Niveau )%>%
+  dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                    FrequenceMoy= wtd.mean(FreqIndiv,AnneePolice),
+                  FrequenceVarIntra= wtd.var(FreqIndiv,AnneePolice),
+              BCMoy= wtd.mean(BurningCostIndiv,AnneePolice),
+                  BCVarIntra= wtd.var(BurningCostIndiv,AnneePolice),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   PrimeMoy_1=Prime/AnneePolice,
+                   NBSIN=SumDouble(NBSIN_NEW),
+                   NBSIN_CLOS=SumDouble(NBSIN_CLOS_NEW),
+                   Freq=NBSIN/AnneePolice,
+                   Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttri = CoutMoyenAttri*Freq,
+                   SP_Attri=Charge_Attri/Prime,
+                   SP = Charge/Prime)
+
+write.csv2(Aggreg_NiveauPuisMot,file =paste0(params$RESULTAT,"Aggreg_NiveauPuisMot.csv"))
+
+
+## Les variables entieres ###
+wtd.est.lm.freq.mot<-lm(FreqIndiv~TYPEMOTE, data=Base_Detaillee_Qualifie_40112, weights = AnneePolice)
+wtd.est.lm.freq.puis<-lm(FreqIndiv~PUISVEHICAT, data=Base_Detaillee_Qualifie_40112, weights = AnneePolice)
+wtd.est.lm.freq.mot.puis<-lm(FreqIndiv~as.factor(Niveau), data=Base_Detaillee_Qualifie_40112, weights = AnneePolice)
+
+wtd.est.lm.freq2<-lm(FreqIndiv~  CODEZONE, data=Base_Detaillee_Modelisation2[Base_Detaillee_Modelisation2$CATERISQ%in%c(401,412),], weights = AnneePolice)
+
+}
+summary(wtd.est.lm.freq2)
+
+## les 3 principales variables
+wtd.est.lm.3variable.freq<-lm(FreqIndiv~  as.factor(Niveau)+CATERISQ+CODEZONE, data=Base_Detaillee_Qualifie_40112, weights = AnneePolice)
+
+
+  # Test de Chi Deux ###
+# Constitus les effectifs observés avec les années polices.
+Tab.AnneePolice.CATERISQ.ZONE=tapply(Base_Detaillee_Modelisation$AnneePolice,list(Base_Detaillee_Modelisation$CATERISQ,Base_Detaillee_Modelisation$CODEZONE),SumDouble)
+Tab.AnneePolice.CATERISQ.ZONE=Tab.AnneePolice.CATERISQ.ZONE[,c(1:3)]
+chisq.test(Tab.AnneePolice.CATERISQ.ZONE)
+
+totaux.CodeZone=tapply(Base_Detaillee_Modelisation$AnneePolice,list(Base_Detaillee_Modelisation$CODEZONE),SumDouble)
+totaux.CodeZone=totaux.CodeZone[c(1:3)]
+Tab.AnneePolice.CATERISQ.ZONE[,3]/totaux.CodeZone[3]
+
+  
+  
+Tab.avenant.CATERISQ.ZONE=table(Base_Detaillee_Modelisation$CATERISQ,Base_Detaillee_Modelisation$CODEZONE)
+Tab.avenant.CATERISQ.ZONE=Tab.avenant.CATERISQ.ZONE[,c(1:3)]
+```
+
+## 07 C- Analyses spécifiques
+
+```{r}
+
+
+# Construction d'information pour un modèle individuel.
+
+
+
+## Test de KHI DEUX
+{
+TotalAnnePolice=SumDouble(PrimeAutoRisque_Sinistre_VF$AnneePolice)     
+   Aggreg_RC_Freq<-PrimeAutoRisque_Sinistre_VF%>%
+        # dplyr::filter(PUISVEHICAT!='0')%>%
+  dplyr::group_by(classeNBSIN)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy_1=Prime/AnneePolice,
+                              NBSIN=SumDouble(NBSIN_NEW),
+                              Freq=NBSIN/AnneePolice,
+                      Proportion=AnneePolice/TotalAnnePolice ,
+                    #   NB_risque=n(Id_RISQUE),
+                     NB_risque_distinct= n_distinct(Id_RISQUE),
+                    Nb_moyen_sinistre= NBSIN/NB_risque_distinct)
+
+   # usage
+     chisq.test(table(PrimeAutoRisque_Sinistre_VF$classeNBSIN,PrimeAutoRisque_Sinistre_VF$CATERISQ)) 
+     
+   # Code zone
+     chisq.test(table(PrimeAutoRisque_Sinistre_VF$classeNBSIN,PrimeAutoRisque_Sinistre_VF$CODEZONE)) 
+
+      # typemoteur
+     chisq.test(table(PrimeAutoRisque_Sinistre_VF$classeNBSIN,PrimeAutoRisque_Sinistre_VF$TYPEMOTE)) 
+
+     #puissance
+        chisq.test(table(PrimeAutoRisque_Sinistre_VF$classeNBSIN,PrimeAutoRisque_Sinistre_VF$PUISVEHICAT)) 
+
+        
+                   write.csv2(Aggreg_RC_Freq,file =paste0(params$RESULTAT,"Aggreg_RC_Freq.CSV"))
+}
+                   
+        ##   Analyse graphique ##
+          ## Zoom sur la categorie 1 
+                   
+                   PrimeAutoRisque_Sinistre_VF%>%dplyr::filter(CATERISQ="401")
+                     ggplot()+
+                     geom_bar(aes( x=PUISVEHICAT, fill=classeNBSIN),)+
+         scale_x_discrete()+
+      ylab("Prime annualisée")+ 
+     xlab("Puissance fiscale du véhicule")
+ # ggtitle("Repartition des volumes souscrit par catégorie d'usage")
+  ggsave("Boxplot_puissance.png",device="png", path=params$RESULTAT)
+  
+  
+        ## Modélisation GLM
+  {
+            ## sur l'ensemble de la population. 
+    PrimePourGraph
+DATA_Modelisation=  PrimePourGraph%>% dplyr::filter(CATERISQ %in% c("401","402","403","405","412"))
+    
+              #1 loi de poisson pour les nombres de sinistres
+   Modele_Individuel_NB = glm( NBSIN ~ CATERISQ + TYPEMOTE + PUISVEHICAT + CODEZONE  ,data=DATA_Modelisation,
+                            family = poisson(link = "log") , weights = AnneePolice)  
+   summary(Modele_Individuel_NB)
+   ## ==> Aucun résultats significatifs. 
+   
+              # 2 loi binomiale pour la survenance de sinisters.
+    Modele_Individuel_freq1 = glm( IsSinistre ~ CATERISQ + TYPEMOTE + PUISVEHICAT + CODEZONE  ,data = DATA_Modelisation, family = binomial(link = "probit") , weights = AnneePolice)  
+summary(Modele_Individuel_freq1)
+# Les modalités CATERISQUE, Certaines de Type Moteur E sont signficiatives
+
+     Modele_Individuel_freq2 = glm( IsSinistre ~ CATERISQ + TYPEMOTE + PUISVEHICAT + CODEZONE  ,data = DATA_Modelisation, family = binomial(link = "logit") , weights = AnneePolice)  
+     summary(Modele_Individuel_freq2)
+    
+     
+     rm(DATA_Modelisation)
+     ## sur la catégorie 1
+    DATA_Modelisation_Cate1= PrimePourGraph%>% dplyr::filter(CATERISQ %in% c("401"))
+
+      Modele_Individuel_NB_Cat1 = glm( NBSIN ~ TYPEMOTE + PUISVEHICAT + CODEZONE  ,data = DATA_Modelisation_Cate1, family = poisson(link = "log") , weights = AnneePolice)  
+ summary(Modele_Individuel_NB_Cat1)
+   
+          ## Aucun résultat significatif. 
+   
+   Modele_Individuel_freq_Cat1 = glm( IsSinistre ~   TYPEMOTE + PUISVEHICAT + CODEZONE  ,data = DATA_Modelisation_Cate1, family = binomial(link = "probit") , weights = AnneePolice)  
+summary(Modele_Individuel_freq_Cat1)
+
+}
+### Construction de la Matrice pour analyse anova
+  {
+  
+   
+   Aggreg_RC_Anova<-PrimeAutoRisque_Sinistre_401%>%dplyr::filter(!is.na(ClasseRisque), ClasseRisque!=0)%>%
+  dplyr::group_by(ClasseRisque,CODEZONE,Niveau)%>%
+   dplyr::summarise(
+       Moyenne_WA_NBSIN=weighted.mean(NBSIN_NEW,AnneePolice, na.rm=TRUE),
+         Moyenne_WA_ISSIN=weighted.mean(IsSinistre,AnneePolice, na.rm=TRUE),
+       Moyenne_WA_Freq=weighted.mean(FreqIndiv,AnneePolice, na.rm=TRUE),
+        Var_WA_NBSIN=wtd.var(NBSIN_NEW,AnneePolice, na.rm=TRUE),
+          Var_WA_Freq=wtd.var(FreqIndiv,AnneePolice, na.rm=TRUE),
+       PrimeSum=SumDouble(PRIMNETT,na.rm = TRUE),
+                              AnneePoliceSum= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy_1=PrimeSum/AnneePoliceSum,
+                              NBSINSum=SumDouble(NBSIN_NEW),
+                              IsSinSum=SumDouble(IsSinistre),
+                              Freq_NBSIN=NBSINSum/AnneePoliceSum,
+                              Freq_IsSin=IsSinSum/AnneePoliceSum,
+                              Moyenne_PoidsNBSin=mean(NBSINPoids),
+                              Moyenne_PoidsIsSin=mean(IsSinistrePoids),
+                    Proportion=AnneePoliceSum/TotalAnnePolice 
+                 #   Lib=paste0("Zone ",CODEZONE, " Niveau",Niveau)  
+                    )
+#Aggreg_RC_CAT1$Lib=paste0("Zone ",Aggreg_RC_CAT1$CODEZONE, "- Niveau ",Aggreg_RC_CAT1$Niveau)  
+
+         write.csv2(Aggreg_RC_Anova,file =paste0(params$RESULTAT,"Aggreg_RC_Anova.csv"))
+        
+      
+      MoyenneGlobaleNBSIN=   wtd.mean(PrimeAutoRisque_Sinistre_401[!is.na(PrimeAutoRisque_Sinistre_401$ClasseRisque)& PrimeAutoRisque_Sinistre_401$ClasseRisque!=0,]$NBSIN_NEW,PrimeAutoRisque_Sinistre_401[!is.na(PrimeAutoRisque_Sinistre_401$ClasseRisque)& PrimeAutoRisque_Sinistre_401$ClasseRisque!=0,]$AnneePolice)
+      
+            #calcul de la variance
+           VarianceGlobaleNBSIN=   wtd.var(PrimeAutoRisque_Sinistre_401[!is.na(PrimeAutoRisque_Sinistre_401$ClasseRisque)& PrimeAutoRisque_Sinistre_401$ClasseRisque!=0,]$NBSIN_NEW,PrimeAutoRisque_Sinistre_401[!is.na(PrimeAutoRisque_Sinistre_401$ClasseRisque)& PrimeAutoRisque_Sinistre_401$ClasseRisque!=0,]$AnneePolice)
+        
+              
+             ## Comment calculer la fréquence moyenne sur l'ensemble de la poluation.      
+         ## comment mésurer les disparités de fréquences dans les sous-groupes. 
+  
+      MoyenneGlobaleFreq=   wtd.mean(PrimeAutoRisque_Sinistre_401[!is.na(PrimeAutoRisque_Sinistre_401$ClasseRisque)& PrimeAutoRisque_Sinistre_401$ClasseRisque!=0,]$FreqIndiv,PrimeAutoRisque_Sinistre_401[!is.na(PrimeAutoRisque_Sinistre_401$ClasseRisque)& PrimeAutoRisque_Sinistre_401$ClasseRisque!=0,]$AnneePolice)
+ 
+      #Variance totale
+           VarianceGlobaleFreq=   wtd.var(PrimeAutoRisque_Sinistre_401[!is.na(PrimeAutoRisque_Sinistre_401$ClasseRisque)& PrimeAutoRisque_Sinistre_401$ClasseRisque!=0,]$FreqIndiv,PrimeAutoRisque_Sinistre_401[!is.na(PrimeAutoRisque_Sinistre_401$ClasseRisque)& PrimeAutoRisque_Sinistre_401$ClasseRisque!=0,]$AnneePolice)
+      
+      #Variance intra classe
+             VarianceIntraFreq=wtd.mean(Aggreg_RC_Anova$Var_WA_Freq,Aggreg_RC_Anova$AnneePoliceSum)
+      
+      #Variance Inter classe
+             VarianceInterFreq = wtd.mean((Aggreg_RC_Anova$Moyenne_WA_Freq-MoyenneGlobaleFreq)^2,Aggreg_RC_Anova$AnneePoliceSum)
+                
+TT<-PrimeAutoRisque_Sinistre_401%>%dplyr::filter(!is.na(ClasseRisque), ClasseRisque!=0)%>%
+  dplyr::summarise( A=weighted.mean(NBSIN_NEW,AnneePolice) )
+
+    ## Anova anaylsis
+
+AnalyseEcart_NBSIN<-aov(NBSIN_NEW~ClasseRisque, data=PrimeAutoRisque_Sinistre_401[!is.na(PrimeAutoRisque_Sinistre_401$ClasseRisque)& PrimeAutoRisque_Sinistre_401$ClasseRisque!=0 &!(PrimeAutoRisque_Sinistre_401$ClasseRisque %in% c('1','2','3','4')),])
+
+AnalyseEcart_Freq<-aov(FreqIndiv~ClasseRisque, data=PrimeAutoRisque_Sinistre_401[!is.na(PrimeAutoRisque_Sinistre_401$ClasseRisque)& PrimeAutoRisque_Sinistre_401$ClasseRisque!=0 &!(PrimeAutoRisque_Sinistre_401$ClasseRisque %in% c('1','2','3','4')),])
+
+
+      MoyenneGlobaleFreq112=   wtd.mean(Base_Detaillee_Qualifie_40112[!is.na(Base_Detaillee_Qualifie_40112$ClasseRisque)& Base_Detaillee_Qualifie_40112$ClasseRisque!=0,]$FreqIndiv,Base_Detaillee_Qualifie_40112[!is.na(Base_Detaillee_Qualifie_40112$ClasseRisque)& Base_Detaillee_Qualifie_40112$ClasseRisque!=0,]$AnneePolice)
+
+  }
+  
+  ### Construction d'arber de classification
+  { 
+  ArbreIsSin<-rpart(IsSinistre ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE , data = Base_Detaillee_Qualifie_40112, weights = AnneePolice,cp=0.05)
+     ArbreFreqDetail<-rpart(FreqIndiv ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE , data = Base_Detaillee_Qualifie_40112[!is.na(Base_Detaillee_Qualifie_40112$ClasseRisque)& Base_Detaillee_Qualifie_40112$ClasseRisque!=0,], weights = AnneePolice,cp=0,maxdepth=5)
+  
+   ArbreFreqAG<-rpart(Moyenne_WA_Freq ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE , data = Aggreg_RC_40112 ,weights = AnneePoliceSum)
+   plot(ArbreFreqAG, uniform=TRUE, main="Classification of Freq")
+   
+      ArbreNBAG<-rpart(NBSINSum ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE , data = Aggreg_RC_40112 ,weights = AnneePoliceSum)
+   
+      plot(ArbreFreqAG, uniform=TRUE, main="Classification of Freq")
+   
+    post(ArbreIsSin,file =paste0(params$RESULTAT,"ArbreIsSin.ps"))
+     post(ArbreFreqDetail,file =paste0(params$RESULTAT,"ArbreFreqDetail.ps"))
+   
+          post(ArbreFreqAG,file =paste0(params$RESULTAT,"ArbreFreq.ps"))
+         post(ArbreNBAG,file =paste0(params$RESULTAT,"ArbreNB2.ps"))
+         
+         rpart.plot(ArbreFreqDetail)
+
+  }
+```
+
+## 08 - Vérificication des classes tarifaires
+
+```{r}
+# construire pour chaque tarif les classes tarifaires auxquels appartiens  conformément au tarifs ##
+
+#saveRDS(PrimeAutoRisque_Sinistre_VF, paste0(params$RESULTAT,"PrimeAutoRisque_Sinistre_VF.RDS"))
+
+# Classes tarifaires  de la categorie 401 ##
+{PrimeAutoRisque_Sinistre_401 = PrimeAutoRisque_Sinistre_VF %>% dplyr::filter(CATERISQ==401)
+PrimeAutoRisque_Sinistre_401$Niveau=NA
+
+# création des groupes de risques en croisant la Puissance et le Type d'éssence
+PrimeAutoRisque_Sinistre_401=within(PrimeAutoRisque_Sinistre_401,
+       {
+         Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('1')]=1
+        Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('2','3','4')]=2
+               Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('5','6')]=3
+                        Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('7','8')]=4
+                                Niveau[TYPEMOTE %in% 'D' & PUISVEHICAT %in% c('9','10','11','12 et plus')]=5
+            
+                                     Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('1','2')]=1
+        Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('3','4','5','6')]=2
+               Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('7','8','9')]=3
+                        Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('10','11')]=4
+                                Niveau[TYPEMOTE %in% 'E' & PUISVEHICAT %in% c('12 et plus')]=5                           
+       })
+
+# Prise en compte de la zone dans la classe de risques.
+  PrimeAutoRisque_Sinistre_401$NiveauZone=NA
+  # recodification des zones
+  PrimeAutoRisque_Sinistre_401=within(PrimeAutoRisque_Sinistre_401,
+                  {
+                    NiveauZone[CODEZONE %in% '1' ]=3
+                     NiveauZone[CODEZONE %in% '2' ]=2
+                        NiveauZone[CODEZONE %in% '3' ]=1
+       })
+PrimeAutoRisque_Sinistre_401$ClasseRisque= NA
+PrimeAutoRisque_Sinistre_401$ClasseRisque= 3*(PrimeAutoRisque_Sinistre_401$Niveau-1)+PrimeAutoRisque_Sinistre_401$NiveauZone
+
+PrimeAutoRisque_Sinistre_401$IsSinistrePoids=PrimeAutoRisque_Sinistre_401$IsSinistre*PrimeAutoRisque_Sinistre_401$AnneePolice
+   PrimeAutoRisque_Sinistre_401$NBSINPoids=PrimeAutoRisque_Sinistre_401$NBSIN_NEW*PrimeAutoRisque_Sinistre_401$AnneePolice
+  PrimeAutoRisque_Sinistre_401$FreqIndiv=PrimeAutoRisque_Sinistre_401$NBSIN_NEW/PrimeAutoRisque_Sinistre_401$AnneePolice   
+}
+### Analyse de la classe tarifaire 1 ####
+
+{
+  TotalAnnePolice=SumDouble(PrimeAutoRisque_Sinistre_401$AnneePolice)
+TotalPrime=SumDouble(PrimeAutoRisque_Sinistre_401$PRIMNETT)
+Freq_moy_401=SumDouble(PrimeAutoRisque_Sinistre_401$NBSIN_NEW)/SumDouble(PrimeAutoRisque_Sinistre_401$AnneePolice)
+PrimeAutoRisque_Sinistre_401$ClasseRisque=as.factor(PrimeAutoRisque_Sinistre_401$ClasseRisque)
+  
+Aggreg_RC_CAT1<-PrimeAutoRisque_Sinistre_401%>%dplyr::filter(!is.na(ClasseRisque), ClasseRisque!=0)%>%
+  dplyr::group_by(ClasseRisque,CODEZONE,Niveau)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy_1=Prime/AnneePolice,
+                              NBSIN=SumDouble(NBSIN_NEW),
+                              Freq=NBSIN/AnneePolice,
+                    Proportion=AnneePolice/TotalAnnePolice #,
+                 #   Lib=paste0("Zone ",CODEZONE, " Niveau",Niveau)  
+                    )
+Aggreg_RC_CAT1$Lib=paste0("Zone ",Aggreg_RC_CAT1$CODEZONE, "- Niveau ",Aggreg_RC_CAT1$Niveau)  
+
+  Aggreg_RC_CAT1%>%
+    ggplot()+
+      geom_col(aes(x=ClasseRisque,y=Prime))
+      
+        # Enseignement: Surprésence des usages 401, 402, 405 et 412.
+  
+  # réparition des expositions
+    Aggreg_RC_CAT1%>%
+    ggplot()+
+      geom_col(aes(y=ClasseRisque,x=AnneePolice))+
+       scale_fill_grey()+
+      geom_label(aes(x = AnneePolice, y =ClasseRisque, label=scales::percent(Proportion,accuracy = 0.1)),hjust = -0.01 )+
+      xlab("Années police (exposition)")+ 
+     ylab("classe de risque")+
+  ggtitle("Repartition des volumes souscrits par classe de risque")
+  
+ggsave("Repartition_classe_401.png",device="png", path=params$RESULTAT)
+
+           
+      Aggreg_RC_CAT1%>%
+    ggplot()+
+      geom_point(aes(x=Prime,y=AnneePolice,size=PrimeMoy_1, color=ClasseRisque))
+ 
+   
+ # Volume et positionnement tarifaire.     
+ PrimeAutoRisque_Sinistre_401%>%
+   ggplot()+
+   geom_jitter(aes(x=AnneePolice  ,y=PrimeMoy, color=ClasseRisque))
+
+ ## répartition des primes moyennes
+  PrimeAutoRisque_Sinistre_401%>%filter(!is.na(ClasseRisque),ClasseRisque!=0)%>%
+   ggplot()+
+    geom_boxplot(aes(x=PrimeMoy, y=ClasseRisque))+
+ #   scale_y_discrete(labels=Vec_label_usage)+
+      xlab("Prime annualisée")+ 
+     ylab("Classe risque")
+ # ggtitle("Repartition des volumes souscrit par catégorie d'usage")
+  ggsave("Boxplot_Classe_401.png",device="png", path=params$RESULTAT)
+
+  ## La fréquence des sinistres 
+  Aggreg_RC_CAT1%>%
+    ggplot()+
+    geom_col(aes(x=ClasseRisque, y=Freq))
+  
+  xmax=quantile(Aggreg_RC_CAT1$PrimeMoy_1,0.85)
+  
+    Aggreg_RC_CAT1%>%dplyr::filter(!ClasseRisque %in% c('1','2','3'))%>%
+    ggplot()+
+    geom_point(aes(x=PrimeMoy_1 ,  y=Freq, color=ClasseRisque))+
+   geom_text(aes(x=PrimeMoy_1 ,  y=Freq, label=Lib),nudge_y = 0.001)+
+           xlab("Prime annualisée moyenne")+
+       ylab("Fréquence")+
+      geom_hline(yintercept = Freq_moy_401, color="grey")+
+      geom_text(y=Freq_moy_401-0.001,x=xmax, label="Frequence moyenne", color ="grey")+
+      scale_y_continuous(labels = scales::percent_format(accuracy = 0.01))+
+      scale_color_discrete() #+
+     # guides(color=FALSE)
+       ggsave("Prime_Freq_401_classe.png",device="png", path=params$RESULTAT)
+
+     Aggreg_RC_CAT1%>%dplyr::filter(!ClasseRisque %in% c('1','2','3'))%>%
+    ggplot()+
+    geom_point(aes(  x=Freq, y=ClasseRisque, size=PrimeMoy_1))+
+        geom_vline(xintercept = Freq_moy_401, color="grey")+
+             geom_text(x=Freq_moy_401-0.002,y=6, label="Frequence du moyenne", color ="grey")+
+          scale_x_continuous(labels = scales::percent_format(accuracy = 0.01))+
+       #   scale_y_discrete(labels=Lib)+
+          xlab("Fréquence")+
+         ylab("Classe de risque")
+         ggsave("Freq_401_classe.png",device="png", path=params$RESULTAT)
+
+  #   +scale_color_gradient(low = "green", high = "red")
+     
+      write.csv2(Aggreg_RC_CATERISQ,file =paste0(params$RESULTAT,"Aggreg_RC_CAT1.csv"))
+
+}    
+
+
+
+
+# Classes tarifaires  de la categorie 401_12 ##
+
+
+# Classes tarifaires de la categoeie 402 ##
+
+# classes tarifaires de la categorie 403 ##
+
+```
+
+## 9A - Construction base de test et base vérification
+
+```{r}
+ProportionTest=0.3
+
+Base_Detaillee_Qualifie_40112$TestResultat=rbinom(length(Base_Detaillee_Qualifie_40112$Id_Police_Risque_Echeance),1,ProportionTest)
+
+#View(Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$AnneeMEC==2019,])
+Base_Detaillee_Qualifie_40112_MEC<-Base_Detaillee_Qualifie_40112_MEC%>%dplyr::filter(AnneeMEC<2020)
+Base_Detaillee_Qualifie_40112_MEC$TestResultat=rbinom(length(Base_Detaillee_Qualifie_40112_MEC$Id_Police_Risque_Echeance),1,ProportionTest)
+
+Base_Detaillee_Qualifie_40112_MEC$Niveau=as.factor(Base_Detaillee_Qualifie_40112_MEC$Niveau)
+Base_Detaillee_Qualifie_40112_MEC$ClasseRisque=as.factor(Base_Detaillee_Qualifie_40112_MEC$ClasseRisque)
+
+Aggreg_Base_40112_MEC<-Base_Detaillee_Qualifie_40112_MEC%>%dplyr::filter(!is.na(ClasseRisque), ClasseRisque!=0)%>%
+  dplyr::group_by(ClasseRisque,CODEZONE,Niveau,CATERISQ,TYPEMOTE,PUISVEHICAT,AnneeMEC,TestResultat,AGEVEHICULE)%>%
+   dplyr::summarise(
+                     
+                 #   Lib=paste0("Zone ",CODEZONE, " Niveau",Niveau)  
+       
+       Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                    #FrequenceMoy= wtd.mean(FreqIndiv,AnneePolice),
+                  #FrequenceVarIntra= wtd.var(FreqIndiv,AnneePolice),
+              #BCMoy= wtd.mean(BurningCostIndiv,AnneePolice),
+               #   BCVarIntra= wtd.var(BurningCostIndiv,AnneePolice),
+                   AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                   PrimeMoy_1=Prime/AnneePolice,
+                   NBSIN=SumDouble(NBSIN_NEW),
+                   NBSIN_CLOS=SumDouble(NBSIN_CLOS_NEW),
+                   Freq=NBSIN/AnneePolice,
+                   Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttri = CoutMoyenAttri*Freq,
+                   SP_Attri=Charge_Attri/Prime,
+                   SP = Charge/Prime
+                    )
+  
+ 
+    Aggreg_Base_40112_MEC$BurningCostAttri[is.na(Aggreg_Base_40112_MEC$BurningCostAttri)]=0
+   Aggreg_Base_40112_MEC$SP_Attri[is.na(Aggreg_Base_40112_MEC$SP_Attri)]=0
+Aggreg_Base_40112_MEC$Proportion=Aggreg_Base_40112_MEC$AnneePolice/SumDouble(Aggreg_Base_40112_MEC$AnneePolice) 
+
+
+
+```
+
+## 9B- Modélisation
+
+```{r}
+## Construction des bases d'estimations et base de test:
+  
+# Objectif 1. Voir si le tarif observé avec les variables du tarifs RC sur les bases d'apprentissage, permet d'anticiper la sinistralité sur la base test. 
+#objectif 2. Voir si en découpant différamment l'information sur ces memes 3 variables, on peut améliorer la prédiction du tarif.
+#Objectif 3. Voir si en ajoutant d'autres variables on améliore la prédictivité.
+# Objectif 3. Mésurer la part de la viariance totale qui expliqué par les variables de ce modele. Le faire avec deux critères. A. La varialce variance expliquée/Variance inexpliquée du BC et de la fréquence. B. La prédictivilité : via le plus faible MSE. 
+# Dans la partie descriptive , regarder la significativé des échantillons pour mésurer.  Décider si c'est mieux de mésurer avec la freq ou le Burning cost.  
+
+
+## A - Modélisation sur la BASE entière: Chercher à se faire une opinion sur la pertinence des variables tarifaires priciniales.
+{
+    #A1: Utilisation d'un modele CART sur la base Agregéee entiere.
+
+          #Frequence 
+ArbreFreqAggreg<-rpart(Freq ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE+ANNEE , data = Aggreg_Base, weights = AnneePolice,control=rpart.control(minsplit=10,cp=0,maxdepth = 5))
+
+          rpart.plot(ArbreFreqAggreg)
+          post(ArbreFreqAggreg,file =paste0(params$RESULTAT,"ArbreFreqAggreg.ps"))
+          post( ArbreFreqAggreg,file =paste0(params$RESULTAT,"ArbreFreqAggreg.ps"))
+
+        #Burning Cost Attri
+ArbreBCAggreg<-rpart(BurningCostAttri ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE+ANNEE , data = Aggreg_Base, weights = AnneePolice,control=rpart.control(minsplit=10,cp=0,maxdepth = 4))
+
+  rpart.plot(ArbreBCAggreg)
+  
+     #SP 
+  ArbreSPAggreg<-rpart(SP_Attri ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE+ANNEE , data = Aggreg_Base, weights = Prime,cp=0,maxdepth=4)
+  rpart.plot(ArbreSPAggreg)
+  
+    #A2: Utilisaton d'un rpart sur les données entières détaillées
+  
+      #Frequence
+  ArbreFreqDetail <-rpart(FreqIndiv ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE+ANNEE , data = PrimeAutoRisque_Sinistre_VF , weights = AnneePolice,control = rpart.control(minsplit=10,cp=0,maxdepth = 4))
+    rpart.plot(ArbreFreqDetail)   
+
+         #Burning cost
+  ArbreBCDetail <-rpart(BurningCostIndiv ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE+ANNEE , data = PrimeAutoRisque_Sinistre_VF , weights = AnneePolice,control = rpart.control(minsplit=1000,cp=0,maxdepth = 4))
+    rpart.plot(ArbreBCDetail)   
+  
+    
+    #A3: Utilisaton d'un rpart sur les données agrégées par risque
+  
+      #Frequence
+  ArbreFreqRisque <-rpart(Freq ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE , data = Aggreg_risque , weights = AnneePolice,control = rpart.control(minsplit=100,cp=0,maxdepth = 5))
+    rpart.plot(ArbreFreqRisque)   
+
+         #Burning cost
+  ArbreBCRisque <-rpart(BurningCostAttri ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE , data = Aggreg_risque , weights = AnneePolice,control = rpart.control(minsplit=100,cp=0,maxdepth = 4))
+    rpart.plot(ArbreBCRisque)   
+
+  
+    #A4: Utilisation d'un modele GLM sur la base agregé entière.
+
+      GLM_BC_Aggreg = glm( BurningCostAttri ~ CATERISQ + TYPEMOTE + PUISVEHICAT + CODEZONE  ,data = Aggreg_Base, family = binomial(link = "probit") , weights = AnneePolice)  
+summary(GLM_BC_Aggreg)
+
+}
+
+## B modélisation sur les 40112e : avec identification des capacités prédictives
+    #B1:Utilisation d'un GLM sur la freq des sinistres
+ 
+  GlmFreqDetail_40112  <-   glm(Freq ~ CATERISQ+ Niveau+CODEZONE, data = Aggreg_Base_40112_MEC[Aggreg_Base_40112_MEC$TestResultat==FALSE & Aggreg_Base_40112_MEC$Freq<1,] , weights = AnneePolice,family=binomial(link = "logit"))
+      
+    GlmFreqDetail_40112_2  <-   glm(FreqIndiv ~ CATERISQ+ Niveau+CODEZONE, data = Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==FALSE & Base_Detaillee_Qualifie_40112_MEC$FreqIndiv<1,] , weights = AnneePolice,family=binomial(link = "logit"))
+    
+    #B2: utilisation d'un GLM sur les nombres de sinsitres
+  GlmNBSINDetail_40112  <-   glm(NBSIN_NEW ~ CATERISQ+ Niveau+CODEZONE, data = Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==FALSE,] , weights = AnneePolice,family=poisson(link = "log"))
+      
+    #B3: utilisaton d'un rpart sur les freq des sinistres
+  ArbreFreqDetail_40112 <-rpart(FreqIndiv ~ CATERISQ+ Niveau+CODEZONE , data = Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==FALSE,] , weights = AnneePolice,control = rpart.control(minsplit=10,cp=0,maxdepth = 4))
+  png(filename =  paste0(path=params$RESULTAT ,"ArbreFreqDetail_40112.png" ))
+    rpart.plot(ArbreFreqDetail_40112,digits = 4)   
+    dev.off()
+    
+  ArbreFreqAggreg_40112 <-rpart(Freq ~ CATERISQ+ Niveau+CODEZONE , data = Aggreg_Base_40112_MEC[Aggreg_Base_40112_MEC$TestResultat==FALSE & Aggreg_Base_40112_MEC$Freq<1,] , weights = AnneePolice,control = rpart.control(minsplit=10,cp=0,maxdepth = 4))
+   rpart.plot(ArbreFreqAggreg_40112)   
+  
+     #B4: utilisation d'un rpart sur les nombres de sinsitres
+  ArbreNBSINDetail_40112 <-rpart(NBSIN_NEW ~ CATERISQ+Niveau+CODEZONE , data = Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==FALSE,] , weights = AnneePolice,control = rpart.control(minsplit=10,cp=0,maxdepth = 4))
+    rpart.plot(ArbreNBSINDetail_40112)   
+
+    ArbreNBSINAggreg_40112 <-rpart(NBSIN ~ CATERISQ+ Niveau+CODEZONE , data = Aggreg_Base_40112_MEC[Aggreg_Base_40112_MEC$TestResultat==FALSE ,] , weights = AnneePolice,control = rpart.control(minsplit=10,cp=0,maxdepth = 4))
+
+           #Frequence
+  ## C Modélisation avec la variable Age de véhicule.
+
+      #C1:Utilisation d'un GLM sur la freq des sinistres
+ 
+  GlmFreqDetail_plus_40112  <-   glm(Freq ~ CATERISQ+ Niveau+CODEZONE +AGEVEHICULE, data = Aggreg_Base_40112_MEC[Aggreg_Base_40112_MEC$TestResultat==FALSE & Aggreg_Base_40112_MEC$Freq<1,] , weights = AnneePolice,family=binomial(link = "logit"))
+   
+   #C2: utilisation d'un GLM sur les nombres de sinsitres
+  GlmNBSINDetail_plus_40112  <-   glm(NBSIN_NEW ~ CATERISQ+ Niveau+CODEZONE+AGEVEHICULE, data = Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==FALSE,] , weights = AnneePolice,family=poisson(link = "log"))
+
+   #C3: utilisaton d'un rpart sur les freq des sinistres
+  
+  #ArbreFreqDetail_40112 <-rpart(FreqIndiv ~ CATERISQ+ Niveau+CODEZONE , data = Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==FALSE,] , weights = AnneePolice,control = rpart.control(minsplit=10,cp=0,maxdepth = 4))
+    #rpart.plot(ArbreFreqDetail_40112)   
+    
+  ArbreFreqAggreg_plus_40112 <-rpart(Freq ~ CATERISQ+ Niveau+CODEZONE+AGEVEHICULE , data = Aggreg_Base_40112_MEC[Aggreg_Base_40112_MEC$TestResultat==FALSE & Aggreg_Base_40112_MEC$Freq<1,] , weights = AnneePolice,control = rpart.control(minsplit=10,cp=0,maxdepth = 4))
+  
+
+   rpart.plot(ArbreFreqAggreg_plus_40112, digits = 4)   
+  
+   
+        #C4: utilisation d'un rpart sur les nombres de sinsitres
+    ArbreFreqDetail_plus_40112 <-rpart(FreqIndiv ~ CATERISQ+ Niveau+CODEZONE+AGEVEHICULE , data = Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==FALSE,] , weights = AnneePolice,control = rpart.control(minsplit=10,cp=0,maxdepth = 4))
+   png(filename =  paste0(path=params$RESULTAT ,"ArbreFreqDetail_plus_40112.png" ))
+ rpart.plot(ArbreFreqDetail_plus_40112,digits = 4)   
+dev.off()
+   
+   ArbreNBSINDetail_plus_40112 <-rpart(NBSIN_NEW ~ CATERISQ+Niveau+CODEZONE +AGEVEHICULE, data = Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==FALSE,] , weights = AnneePolice,control = rpart.control(minsplit=10,cp=0,maxdepth = 4))
+    rpart.plot(ArbreNBSINDetail_plus_40112)   
+
+   
+     ## Retrait des variables non significatives dans la modélisation
+   #D1
+      GlmFreqDetail_moins_40112  <-   glm(Freq ~ CATERISQ +AGEVEHICULE+CODEZONE, data = Aggreg_Base_40112_MEC[Aggreg_Base_40112_MEC$TestResultat==FALSE & Aggreg_Base_40112_MEC$Freq<1,] , weights = AnneePolice,family=binomial(link = "logit"))
+   
+         #Burning cost
+ { ArbreBCDetail_40112 <-rpart(BurningCostIndiv ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE+ANNEE , data = Base_Detaillee_Qualifie_40112[Base_Detaillee_Qualifie_40112$TestResultat==FALSE,] , weights = AnneePolice,control = rpart.control(minsplit=1000,cp=0,maxdepth = 4))
+    rpart.plot(ArbreBCDetail_40112) 
+    
+        #B4: Utilisaton d'un rpart sur les données entières détaillées plus introduction d'une nouvelle variable
+ 
+      #Frequence
+  ArbreFreqDetail_40112_MEC <-rpart(FreqIndiv ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE+ANNEE+AGEVEHICULE , data = Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==FALSE,] , weights = AnneePolice,control = rpart.control(minsplit=10,cp=0,maxdepth = 4))
+    rpart.plot(ArbreFreqDetail_40112_MEC)   
+
+     #Burning cost
+  ArbreBCDetail_40112_MEC <-rpart(BurningCostIndiv ~ CATERISQ+ TYPEMOTE+PUISVEHICAT+CODEZONE+ANNEE+AGEVEHICULE , data = Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==FALSE,] , weights = AnneePolice,control = rpart.control(minsplit=1000,cp=0,maxdepth = 4))
+    rpart.plot(ArbreBCDetail_40112_MEC) 
+    }
+```
+
+## 10-Vérification de la qualité des prédictions sur la base de test
+
+```{r}
+#Construction des valeurs prédictes à partir des estimations #
+BaseTest=Base_Detaillee_Qualifie_40112_MEC[Base_Detaillee_Qualifie_40112_MEC$TestResultat==TRUE,]
+BaseTestAggreg<-BaseTest%>%dplyr::group_by(ClasseRisque,CODEZONE,Niveau,CATERISQ,TYPEMOTE,PUISVEHICAT,AGEVEHICULE,TestResultat)%>%
+    dplyr::summarise( AnneePolice=SumDouble(AnneePolice),
+                      NBSIN=SumDouble(NBSIN_NEW),
+                      Freq=NBSIN/AnneePolice)
+
+
+# résultats des estimations
+#B1
+BaseTestAggreg$Pred.GlmFreqDetail_40112 = predict.glm(GlmFreqDetail_40112,BaseTestAggreg, type="response")
+BaseTestAggreg$Pred.GlmFreqDetail_40112.NBSIN=BaseTestAggreg$Pred.GlmFreqDetail_40112*BaseTestAggreg$AnneePolice
+#tapply(BaseTestAggreg$pred.GlmFreqDetail_40112*BaseTestAggreg$AnneePolice,list(BaseTestAggreg$CATERISQ,BaseTestAggreg$Niveau),SumDouble)
+#tapply(BaseTestAggreg$NBSIN,list(BaseTestAggreg$CATERISQ,BaseTestAggreg$Niveau),SumDouble)
+
+#B2
+BaseTest$Pred.GlmNBSINDetail_40112 = predict.glm(GlmNBSINDetail_40112,BaseTest, type="response")*BaseTest$AnneePolice
+#tapply(BaseTest$pred.GlmNBSINDetail_40112,list(BaseTest$CATERISQ,BaseTest$Niveau),SumDouble)
+
+BaseTestAggreg$Pred.GlmNBSINDetail_40112=predict.glm(GlmNBSINDetail_40112,BaseTestAggreg, type="response")*BaseTestAggreg$AnneePolice
+#tapply(BaseTestAggreg$pred.GlmNBSINDetail_40112,list(BaseTestAggreg$CATERISQ,BaseTestAggreg$Niveau),SumDouble)
+
+#
+#B3
+BaseTest$Pred.ArbreFreqDetail_40112=rpart.predict(ArbreFreqDetail_40112,BaseTest)
+BaseTest$Pred.ArbreFreqDetail_40112.NBSIN=BaseTest$Pred.ArbreFreqDetail_40112*BaseTest$AnneePolice
+#NombreSinPredB3=tapply(BaseTest$Pred.ArbreFreqDetail_40112*BaseTest$AnneePolice,list(BaseTest$CATERISQ,BaseTest$Niveau),SumDouble)
+#NombreSin_B3=tapply(BaseTest$Pred.ArbreFreqDetail_40112.NBSIN,list(BaseTest$CATERISQ,BaseTest$Niveau),SumDouble)
+
+BaseTestAggreg$Pred.ArbreFreqDetail_40112=rpart.predict(ArbreFreqDetail_40112,BaseTestAggreg)
+BaseTestAggreg$Pred.ArbreFreqDetail_40112.NBSIN=BaseTestAggreg$Pred.ArbreFreqDetail_40112*BaseTestAggreg$AnneePolice
+
+
+BaseTestAggreg$Pred.ArbreFreqAggreg_40112=rpart.predict(ArbreFreqAggreg_40112,BaseTestAggreg)
+BaseTestAggreg$Pred.ArbreFreqAggreg_40112.NBSIN=BaseTestAggreg$Pred.ArbreFreqAggreg_40112*BaseTestAggreg$AnneePolice
+
+
+#NombreSinPredB3=tapply(BaseTestAggreg$Pred.ArbreFreqAggreg_40112.NBSIN,list(BaseTestAggreg$CATERISQ,BaseTestAggreg$Niveau),SumDouble)
+
+#NombreSin_B3=tapply(BaseTestAggreg$NBSIN,list(BaseTestAggreg$CATERISQ,BaseTestAggreg$Niveau),SumDouble)
+
+#B4
+BaseTest$Pred.ArbreNBSINDetail_40112=rpart.predict(ArbreNBSINDetail_40112,BaseTest)*BaseTest$AnneePolice
+#tapply(BaseTest$Pred.ArbreNBSINDetail_40112,list(BaseTest$CATERISQ,BaseTest$Niveau),SumDouble)
+
+BaseTestAggreg$Pred.ArbreNBSINDetail_40112=rpart.predict(ArbreNBSINDetail_40112,BaseTestAggreg)*BaseTestAggreg$AnneePolice
+
+BaseTestAggreg$Pred.ArbreNBSINAggreg_40112=rpart.predict(ArbreNBSINAggreg_40112,BaseTestAggreg)
+
+#tapply(BaseTestAggreg$Pred.ArbreNBSINAggreg_40112,list(BaseTestAggreg$CATERISQ,BaseTestAggreg$Niveau),SumDouble)
+
+#tapply(BaseTestAggreg$NBSIN,list(BaseTestAggreg$CATERISQ,BaseTestAggreg$Niveau),SumDouble)
+
+#C1 Prédiction avec usage de AgeVehicule.
+  BaseTestAggreg$Pred.GlmFreqDetail_plus_40112.NBSIN=predict.glm(GlmFreqDetail_plus_40112,BaseTestAggreg, type="response")*BaseTestAggreg$AnneePolice
+
+  #C2
+BaseTestAggreg$Pred.GlmNBSINDetail_plus_40112=predict.glm(GlmNBSINDetail_plus_40112,BaseTestAggreg, type="response")*BaseTestAggreg$AnneePolice
+
+  #C3
+BaseTestAggreg$Pred.ArbreFreqDetail_plus_40112.NBSIN=rpart.predict(ArbreFreqDetail_plus_40112,BaseTestAggreg)*BaseTestAggreg$AnneePolice
+
+
+  #C4
+BaseTestAggreg$Pred.ArbreNBSINDetail_plus_40112=rpart.predict(ArbreNBSINDetail_plus_40112,BaseTestAggreg)*BaseTestAggreg$AnneePolice
+
+## Enregistrement des prédictions
+
+   write.csv2(BaseTestAggreg,file =paste0(params$RESULTAT,"BaseTestAggreg.csv"))
+```
+
+## A suprimer
+
+```{r}
+####
+BaseTest$Pred.ArbreBCDetail_40112_MEC=rpart.predict(ArbreBCDetail_40112_MEC,BaseTest)
+BaseTest$Pred.ArbreFreqDetail_40112_MEC=rpart.predict(ArbreFreqDetail_40112_MEC,BaseTest)
+
+BaseTest$BurningCostIndiv-Pred.ArbreBCDetail_40112_MEC
+
+wtd.mean(Pred.ArbreBCDetail_40112_MEC,BaseTest$AnneePolice)
+wtd.var(Pred.ArbreBCDetail_40112_MEC,BaseTest$AnneePolice)
+wtd.mean(Pred.ArbreBCDetail_40112,BaseTest$AnneePolice)
+wtd.var(Pred.ArbreBCDetail_40112,BaseTest$AnneePolice)
+wtd.mean(BaseTest$BurningCostIndiv,BaseTest$AnneePolice)
+wtd.var(BaseTest$BurningCostIndiv,BaseTest$AnneePolice)
+
+BaseTest$Pred.ArbreBCDetail_40112=Pred.ArbreBCDetail_40112
+BaseTest$Pred.ArbreBCDetail_40112_MEC=Pred.ArbreBCDetail_40112_MEC
+
+
+#resitution graphiques de la comparabilité des résultats.
+BaseTestAgrege<-BaseTest%>%dplyr::filter(!ClasseRisque %in% c(4,5))%>% 
+  dplyr::group_by(TYPEMOTE)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                                    BurningCostAttriEvalue2=wtd.mean(BurningCostIndiv,AnneePolice),
+                     FreqEvalue2=wtd.mean(FreqIndiv,AnneePolice),
+                          Pred.ArbreBCDetail_40112=wtd.mean(Pred.ArbreBCDetail_40112,AnneePolice,na.rm = TRUE), 
+                    Pred.ArbreFreqDetail_40112=wtd.mean(Pred.ArbreFreqDetail_40112,AnneePolice,na.rm = TRUE), 
+                    Pred.ArbreBCDetail_40112_MEC=wtd.mean(Pred.ArbreBCDetail_40112_MEC,AnneePolice,na.rm = TRUE),
+              Pred.ArbreFreqDetail_40112_MEC=wtd.mean(Pred.ArbreFreqDetail_40112_MEC,AnneePolice,na.rm = TRUE),
+                              AnneePolice= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy_1=Prime/AnneePolice,
+                              NBSIN=SumDouble(NBSIN_NEW),
+                              Freq=NBSIN/AnneePolice,
+                     Charge=SumDouble(CHARGENET_New),
+                   Charge_Clos=SumDouble(CHARGENET_New_CLOS),
+                   Charge_Attri=SumDouble(CHARGENET_New_ATTRITION975),
+                   CoutMoyenAttri= Charge_Attri/NBSIN,
+                   BurningCostAttriEvalue1 = CoutMoyenAttri*Freq,
+                   SP_Attri=Charge_Attri/Prime,
+                   SP = Charge/Prime
+                          )
+ 
+  
+BaseTestAgrege_graph_BC <- BaseTestAgrege%>%dplyr::select("TYPEMOTE",BurningCostAttriEvalue2,Pred.ArbreBCDetail_40112,Pred.ArbreBCDetail_40112_MEC)%>%
+tidyr::gather("Evaluation","Valeur",c("BurningCostAttriEvalue2","Pred.ArbreBCDetail_40112","Pred.ArbreBCDetail_40112_MEC"))
+    BaseTestAgrege_graph_BC %>% ggplot()+
+      geom_col(aes(x=TYPEMOTE,y=Valeur,fill=Evaluation),position = "dodge")#+
+     # facet_grid(.~CATERISQ)
+
+    BaseTestAgrege_graph_freq <- BaseTestAgrege%>%dplyr::select(c("TYPEMOTE","FreqEvalue2","Pred.ArbreFreqDetail_40112","Pred.ArbreFreqDetail_40112_MEC"))%>%tidyr::gather("Evaluation","Valeur",c("FreqEvalue2","Pred.ArbreFreqDetail_40112","Pred.ArbreFreqDetail_40112_MEC"))
+    BaseTestAgrege_graph_freq %>% ggplot()+
+      geom_col(aes(x=TYPEMOTE,y=Valeur,fill=Evaluation),position = "dodge")#+
+     # facet_grid(.~CATERISQ)
+```
+
+## 11 - Evaluation de la qualité des prévisions
+
+```{r}
+Liste_Estimation=c("Pred.GlmFreqDetail_40112.NBSIN","Pred.GlmNBSINDetail_40112","Pred.ArbreFreqDetail_40112.NBSIN","Pred.ArbreFreqAggreg_40112.NBSIN","Pred.ArbreNBSINDetail_40112","Pred.ArbreNBSINAggreg_40112","Pred.GlmFreqDetail_plus_40112.NBSIN","Pred.GlmNBSINDetail_plus_40112","Pred.ArbreFreqDetail_plus_40112.NBSIN",
+"Pred.ArbreNBSINDetail_plus_40112")
+
+BaseTestAggreg_Evaluation<-BaseTestAggreg%>%tidyr::gather("Estimation","NBSIN_Estime",Liste_Estimation)
+BaseTestAggreg_Evaluation$Frequence.Estime=BaseTestAggreg_Evaluation$NBSIN_Estime/BaseTestAggreg_Evaluation$AnneePolice
+BaseTestAggreg_Evaluation$Frequence.Observe=BaseTestAggreg_Evaluation$NBSIN/BaseTestAggreg_Evaluation$AnneePolice
+
+BaseTestAggreg_Evaluation$SumSq=BaseTestAggreg_Evaluation$AnneePolice*(BaseTestAggreg_Evaluation$Frequence.Observe-BaseTestAggreg_Evaluation$Frequence.Estime)^2
+
+#Matrice des principaux résultats
+ResumeErreur=BaseTestAggreg_Evaluation%>%dplyr::group_by(Estimation)%>%
+  dplyr::summarise(
+    SumSSError=SumDouble(SumSq),
+        NBSIN_Estime =SumDouble(NBSIN_Estime)
+
+  )
+   write.csv2(ResumeErreur,file =paste0(params$RESULTAT,"ResumeErreur.csv"))
+
+
+BaseTestAggreg_Evaluation=BaseTestAggreg_Evaluation%>%dplyr::filter(Estimation %in% c("pred.GlmFreqDetail_40112.NBSIN","pred.GlmNBSINDetail_40112","Pred.ArbreFreqDetail_40112.NBSIN","Pred.GlmFreqDetail_plus_40112.NBSIN","Pred.GlmNBSINDetail_plus_40112","Pred.ArbreFreqDetail_plus_40112.NBSIN","Pred.ArbreNBSINDetail_plus_40112"))%>%
+  dplyr::group_by(ClasseRisque,Estimation)%>%
+  dplyr::summarise(
+    NBSIN_Estime =SumDouble(NBSIN_Estime),
+    FrequenceEstime = SumDouble(NBSIN_Estime)/SumDouble(AnneePolice),
+    NBSIN = SumDouble(NBSIN),
+    AnneePolice=SumDouble(AnneePolice),
+    FrequenceObservee=NBSIN/AnneePolice,
+    SSError=AnneePolice*((FrequenceObservee-FrequenceEstime)^2)
+  )
+
+
+Mastrice=BaseTestAggreg_Evaluation%>%dplyr::group_by(Estimation)%>%
+  dplyr::summarise(
+    SumSSError=SumDouble(SSError),
+        NBSIN_Estime =SumDouble(NBSIN_Estime)
+
+  )
+```
+
+## 12-Présentation graphique des résulats
+
+```{r}
+Liste_Estimation=c("Pred.GlmFreqDetail_40112.NBSIN","Pred.GlmNBSINDetail_40112","Pred.ArbreFreqDetail_40112.NBSIN","Pred.ArbreFreqAggreg_40112.NBSIN","Pred.ArbreNBSINDetail_40112","Pred.ArbreNBSINAggreg_40112","Pred.GlmFreqDetail_plus_40112.NBSIN","Pred.GlmNBSINDetail_plus_40112","Pred.ArbreFreqDetail_plus_40112.NBSIN",
+"Pred.ArbreNBSINDetail_plus_40112","NBSIN")
+BaseTestAggreg_graph<-BaseTestAggreg%>%tidyr::gather("Estimation","NBSIN_Estime",Liste_Estimation)
+BaseTestAggreg$ClasseAgeVeh=cut(BaseTestAggreg$AGEVEHICULE,c(0,3,6,8,10,25,50))
+  BaseTestAggreg_graph$ClasseRisque=as.factor(BaseTestAggreg_graph$ClasseRisque)
+
+BaseTestAggreg_graph =BaseTestAggreg_graph%>%dplyr::filter(Estimation %in% c("NBSIN","Pred.GlmFreqDetail_40112.NBSIN","Pred.ArbreFreqDetail_40112.NBSIN","Pred.GlmFreqDetail_plus_40112.NBSIN","Pred.ArbreFreqDetail_plus_40112.NBSIN"))%>%
+dplyr::group_by( ClasseAgeVeh,CATERISQ,Estimation)%>%
+  dplyr::summarise(
+    Frequence = SumDouble(NBSIN_Estime)/SumDouble(AnneePolice),
+    AnneePolice=SumDouble(AnneePolice),
+  )
+
+BaseTestAggreg_graph%>%dplyr::filter(AnneePolice>30,Estimation%in%c("NBSIN","Pred.ArbreFreqDetail_40112.NBSIN","Pred.ArbreFreqDetail_plus_40112.NBSIN"))%>%
+  ggplot()+
+        geom_col(aes(x=ClasseAgeVeh,y=Frequence,fill=Estimation),position = "dodge",width=0.8)+
+      facet_grid(CATERISQ~.)
+
+## Modele initial ##
+
+
+  
+```
+
+## Calcul des primes acquises et expositions agrégées par variables tarifaires
+
+```{r}
+
+
+# Critère: Type Moteur.
+Label_variable= 
+
+PrimeAutoRisque_Sinistre%>% dplyr::filter(AnomaliePrimeAnnualise==FALSE,AnomaliePeriodeEmission==FALSE)%>%
+  ggplot()+
+  geom_point(aes(x=PRIMNETT,y=AnneePolice, color=TYPEMOTE,size=PrimeMoy, alpha=0.5))
+
+Aggreg_RC_TYPEMOT=PrimeAutorisque_pour_Exposition %>% 
+ dplyr:: group_by(ANNEE,TYPEMOTE)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              Exposition= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy=Prime/Exposition)
+
+
+
+#Prime Acquise calculée sur une table pour laquelle chaque ligne représente une quittance.
+
+  #Calcul de l'exposition indispensable pour le calcul de la prime acquise
+ PrimeAutorisque_pour_PrimeAcquise$AnneePolice= Exposition(PrimeAutorisque_pour_PrimeAcquise$DATEEFFE,PrimeAutorisque_pour_PrimeAcquise$DATEECHE)
+
+
+ by_Variables=c("CODECATE2","CODEGARA3","CODEZONE","TYPEMOTE","PUISVEHICAT","CATERISQ","FLOTTE")
+
+    start_time <- Sys.time()
+     PrimeAutoRisque_ACQUI0=AggregationAcquisition(2004,2009,by_Variables,PrimeAutorisque_pour_PrimeAcquise)
+    PrimeAutoRisque_ACQUI1=AggregationAcquisition(2010,2013,by_Variables,PrimeAutorisque_pour_PrimeAcquise)
+      PrimeAutoRisque_ACQUI2=AggregationAcquisition(2014,2016,by_Variables,PrimeAutorisque_pour_PrimeAcquise)
+      PrimeAutoRisque_ACQUI3=AggregationAcquisition(2017,2020,by_Variables,PrimeAutorisque_pour_PrimeAcquise)
+    PrimeAutoRisque_ACQUI_PRIME=rbind(PrimeAutoRisque_ACQUI0,PrimeAutoRisque_ACQUI1,PrimeAutoRisque_ACQUI2,PrimeAutoRisque_ACQUI3)
+    end_time <- Sys.time()
+  
+t2=end_time - start_time
+print(t2)
+rm(PrimeAutoRisque_ACQUI0)
+rm(PrimeAutoRisque_ACQUI1)
+rm(PrimeAutoRisque_ACQUI2)
+rm(PrimeAutoRisque_ACQUI3)
+
+# Ajout du CODECATE3
+
+  
+# Les années risques évalués sur une table ou la ligne représente les risques souscrits sur une périodes. 
+
+ PrimeAutorisque_pour_Exposition$AnneePolice= Exposition(PrimeAutorisque_pour_Exposition$DATEEFFE,PrimeAutorisque_pour_Exposition$DATEECHE)
+
+ #On calcul la varailbe année qui est manquante dans la table PrimeAutorisque_pour_Exposition en faisant le proxy que la date d'effet correspond à la date d'émission.
+ 
+ PrimeAutorisque_pour_Exposition$ANNEE=ExtractionAnnee(PrimeAutorisque_pour_Exposition$DATEEFFE)
+ PrimeAutorisque_pour_Exposition=PrimeAutorisque_pour_Exposition%>%dplyr::filter(ANNEE>params$PeriodeAnalyse)
+ PrimeAutorisque_pour_Exposition$ANNEE= as.factor( PrimeAutorisque_pour_Exposition$ANNEE)
+ 
+  by_Variables=c("CODECATE2","CODEGARA3","CODEZONE","TYPEMOTE","PUISVEHICAT","CATERISQ","FLOTTE")
+
+    start_time <- Sys.time()
+    PrimeAutoRisque_ACQUI0=AggregationAcquisition(2004,2009,by_Variables,PrimeAutorisque_pour_Exposition)
+    PrimeAutoRisque_ACQUI1=AggregationAcquisition(2010,2013,by_Variables,PrimeAutorisque_pour_Exposition)
+ PrimeAutoRisque_ACQUI2=AggregationAcquisition(2014,2016,by_Variables,PrimeAutorisque_pour_Exposition)
+      PrimeAutoRisque_ACQUI3=AggregationAcquisition(2017,2020,by_Variables,PrimeAutorisque_pour_Exposition)
+    PrimeAutoRisque_ACQUI_Expo=rbind(PrimeAutoRisque_ACQUI0,PrimeAutoRisque_ACQUI1,PrimeAutoRisque_ACQUI2,PrimeAutoRisque_ACQUI3)
+    end_time <- Sys.time()
+  
+t2=end_time - start_time
+print(t2)
+rm(PrimeAutoRisque_ACQUI0)
+rm(PrimeAutoRisque_ACQUI1)
+rm(PrimeAutoRisque_ACQUI2)
+rm(PrimeAutoRisque_ACQUI3)
+
+#Hendrick: On retient la Prime acquise de la table PrimeAutoRisque_ACQUI_PRIME   et l'exposition dans la table PrimeAutoRisque_ACQUI_Expo 
+
+#Instruction: Joindre PrimeAutoRisque_ACQUI et PrimeAutoRisque_ACQUI_Expo
+ #PrimeAutoRisque_ACQUI= left_join(PrimeAutoRisque_ACQUI_Expo[,""])
+
+#write.csv2(PrimeAutoRisque_ACQUI_PRIME,file =paste0(params$RESULTAT,"PrimeAutoRisque_ACQUI.csv"))
+
+saveRDS(PrimeAutoRisque_ACQUI_PRIME, paste0(params$RESULTAT,"PrimeAutoRisque_ACQUI_PRIME.RDS"))
+saveRDS(PrimeAutoRisque_ACQUI_Expo, paste0(params$RESULTAT,"PrimeAutoRisque_ACQUI_Expo.RDS"))
+
+
+
+
+```
+
+## Construction de base de sinistres agrégés
+
+```{r}
+## Agregation des base agreg
+
+ by_Variables=c("ANNEESURV","CODECATE3","CODEGARA3","CODEZONE","TYPEMOTE","PUISVEHICAT","CATERISQ")
+ Vec_Variables=c("NBSIN")
+ 
+  #  start_time <- Sys.time()
+   #     BaseSin_Aggreg <-aggregate(Base_Sinistre_Analyse_risque[,Vec_Variables],by=Base_Sinistre_Analyse_risque[,by_Variables], FUN = SumDouble, na.rm=TRUE)
+
+  #   end_time <- Sys.time()
+  #  print(end_time-start_time)
+
+ ## Agrege les données de sinistres en mettant en avant les typologies de problemes.
+BaseSin_Aggreg_Analyse_anomalie=Base_Sinistre_Analyse_risque%>%dplyr::filter(ANNEE>params$PeriodeAnalyse,ANNEE<2021)%>%
+      dplyr::group_by(ANNEESURV,SANS_FLUX,CLOS,CLASSE_SANS_SUITE,ID_ANOMALIE_RETRAIT,SANS_FLUX_NEW)%>%
+            dplyr::summarise(NBSIN=SumDouble(NBSIN,na.rm = TRUE),
+                             CHARGENET_old=SumDouble(CHARGENET,na.rm=TRUE),
+                                  PAYEALLNET_old= SumDouble(PAYEALLNET,na.rm = TRUE), 
+                                    SAPNET_old= SumDouble(SAPNET,na.rm = TRUE),
+                              CHARGENET= SumDouble(CHARGENET_New,na.rm = TRUE),                                                    PAYEALLNET= SumDouble(PAYEALLNET_New,na.rm = TRUE),     
+                              SAPNET= SumDouble(SAPNET_New,na.rm = TRUE))%>%
+                   dplyr::rename(ANNEE=ANNEESURV)   
+
+ write.csv2(BaseSin_Aggreg_Analyse_anomalie,file =paste0(params$RESULTAT,"BaseSin_Aggreg_Analyse_anomalie.csv"))
+
+    ### Merge Agreg BaseSin_Aggreg et PrimeAutoRisque_acqui
+
+    ## Agreger La Base Prime hors année d'émission
+
+ 
+ ### Agrege les charges de sinistres sur la base des variables de sinistres corrigées.
+ 
+ start_time <- Sys.time()
+    BaseSin_Aggreg=Base_Sinistre_Analyse_risque%>%dplyr::filter(ANNEE>params$PeriodeAnalyse,ANNEE<2021)%>%
+      dplyr::group_by(ANNEESURV,CODECATE2,CODEGARA3,CODEZONE,TYPEMOTE,PUISVEHICAT,CATERISQ,FLOTTE)%>%
+            dplyr::summarise(NBSIN=SumDouble(NBSIN,na.rm = TRUE),
+                              CHARGENET= SumDouble(CHARGENET_New,na.rm = TRUE),                                                    PAYEALLNET= SumDouble(PAYEALLNET_New,na.rm = TRUE),     
+                              SAPNET= SumDouble(SAPNET_New,na.rm = TRUE))%>%
+                   dplyr::rename(ANNEE=ANNEESURV)   
+
+    end_time <- Sys.time()
+print(end_time-start_time)
+
+ write.csv2(BaseSin_Aggreg,file =paste0(params$RESULTAT,"BaseSin_Aggreg.csv"))
+
+
+ ## Agregation des Variables de Primes Acquises
+ 
+#start_time <- Sys.time()
+#by_Variables=c("AnneeAcquisition","CODECATE2","CODEGARA3","CODEZONE","TYPEMOTE","PUISVEHICAT")
+ #Base_Prime_aggreg=aggregate(PrimeAutoRisque_ACQUI_Expo[,c("PrimeAcquise","Acquisition")],by=PrimeAutoRisque_ACQUI_Expo[,by_Variables], FUN = SumDouble, na.rm=TRUE)
+#    end_time <- Sys.time()
+#print(end_time-start_time)
+
+ #/!\ Vérifier que la période d'agrégation de la prime correspond bien à la notion de période d'acquisition
+#start_time <- Sys.time()
+#   Base_Prime_aggreg=PrimeAutoRisque_ACQUI_Expo%>%
+#      dplyr::group_by(AnneeAcquisition,CODECATE2,CODEGARA3,CODEZONE,TYPEMOTE,PUISVEHICAT,CATERISQ,FLOTTE)%>%
+#            dplyr::summarise(PrimeAcquise=SumDouble(PrimeAcquise,na.rm = TRUE),
+       #                       Acquisition= SumDouble(Acquisition,na.rm = TRUE))%>%
+    #                        dplyr::rename(ANNEE=AnneeAcquisition)      
+   # end_time <- Sys.time()
+# print(end_time-start_time)
+ #
+Base_Prime_aggreg=PrimeAutoRisque_ACQUI_Expo%>% dplyr::rename(ANNEE=AnneeAcquisition)   
+ write.csv2(Base_Prime_aggreg,file =paste0(params$RESULTAT,"Base_Prime_aggreg.csv"))
+
+ # Fusion des base Primes et Sinistres
+start_time <- Sys.time()
+Analyse_Freq = merge(Base_Prime_aggreg, BaseSin_Aggreg, by = intersect(names(Base_Prime_aggreg),names(BaseSin_Aggreg)), all.x =TRUE , all.y = FALSE )
+
+end_time <- Sys.time()
+print(end_time-start_time)
+ #write.csv2(Analyse_Freq,file =paste0(params$RESULTAT,"Analyse_Freq.csv"))
+
+
+Analyse_Freq$CHARGENET[is.na(Analyse_Freq$CHARGENET)]=0
+Analyse_Freq$PAYEALLNET[is.na(Analyse_Freq$PAYEALLNET)]=0
+Analyse_Freq$SAPNET[is.na(Analyse_Freq$SAPNET)]=0
+
+Analyse_Freq$NBSIN[is.na(Analyse_Freq$NBSIN)]=0
+Analyse_Freq$Freq=Analyse_Freq$NBSIN/Analyse_Freq$Acquisition
+
+Analyse_Freq_Significatif=Analyse_Freq%>%filter(Acquisition>0,Freq<1)
+Analyse_Freq_SegmentSousRepresente=Analyse_Freq%>%filter(Freq>1)
+
+write.csv2(Analyse_Freq,file =paste0(params$RESULTAT,"Analyse_Freq.csv"))
+saveRDS(Analyse_Freq, paste0(params$RESULTAT,"Analyse_Freq.RDS"))
+saveRDS(Analyse_Freq_Significatif, paste0(params$ANOMALIE,"Analyse_Freq_Significatif.RDS"))
+saveRDS(Analyse_Freq_SegmentSousRepresente, paste0(params$ANOMALIE,"Analyse_Freq_SegmentSousRepresente.RDS"))
+
+#
+
+```
+
+## Analyse descriptive de la table PrimeAutoRisque
+
+```{r eval=FALSE, include=FALSE}
+
+
+
+#PrimeAutoRisque%>%dplyr::group_by(ANNEE)%>%
+#  dplyr::summarise( PRIME= SumDouble(PRIMNETTE,na.rm = TRUE))%>%
+#   ggplot()+ geom_col(aes(x = as.factor(ANNEE), y=PRIME ))
+#
+# Vérification de l'existance des principale variable tarifaire sur la période.
+  #CODEZONE
+#PrimeAutoRisque%>%
+#  ggplot+geom_bar(aes(x=as.factor(ANNEE),fill=CODEZONE ), position = "dodge")
+  
+  #TYPEMOT
+#PrimeAutoRisque%>%
+#  ggplot+geom_bar(aes(x=as.factor(ANNEE),fill=TYPEMOTE ), position = "dodge")
+  
+  #CATERISQ
+#PrimeAutoRisque%>%
+#  ggplot+geom_bar(aes(x=as.factor(ANNEE),fill=as.factor(CATERISQ) ), position = "dodge")
+
+
+### Poursuite des analyse avec PrimeAutorisque_pour_exposition
+PrimeAutoRisque_Sinistre%>% dplyr::filter(AnomaliePrimeAnnualise==FALSE,AnomaliePeriodeEmission==FALSE)%>%
+dplyr::group_by(ANNEE)%>%
+  dplyr::summarise( PRIME= SumDouble(PRIMNETT,na.rm = TRUE))%>%
+   ggplot()+ geom_col(aes(x = as.factor(ANNEE), y=PRIME ))
+
+
+# Critère: Type Moteur.
+Label_variable="Type de Moteur"
+Aggreg_RC_TYPEMOT=PrimeAutorisque_pour_Exposition %>% 
+ dplyr:: group_by(ANNEE,TYPEMOTE)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              Exposition= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy=Prime/Exposition)
+
+
+Aggreg_RC_TYPEMOT %>%   
+ggplot()+
+  geom_col(aes(y=Prime/656, x=as.factor(ANNEE), fill=`TYPEMOTE`,position = "dodge"))+
+  scale_y_continuous(breaks = 1e6*c(2,4,6), labels = paste0(c(2,4,6)," M€"))+
+    scale_fill_grey()+
+  ylab("Prime acquises")+
+  xlab("Années")+
+  ggtitle(paste0("Evolution des Primes RC Acquise par ",Label_variable))
+  
+
+Aggreg_RC_TYPEMOT %>%   
+ggplot()+
+  geom_col(aes(y=Exposition, x=as.factor(ANNEE), fill=`TYPEMOTE`,position = "dodge"))+
+  scale_y_continuous()+
+    scale_fill_grey()+
+  ylab("Année polices")+
+  xlab("Années")+
+  ggtitle(paste0("Evolution des années de police par ",Label_variable))
+  
+
+# Critère: usage.
+Label_variable="Usage du véhicule"
+Aggreg_RC_Usage=PrimeAutorisque_pour_Exposition %>% 
+ dplyr:: group_by(ANNEE,CATERISQ)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              Exposition= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy=Prime/Exposition)
+
+
+PrimeAutorisque_pour_Exposition$PrimeMoy=PrimeAutorisque_pour_Exposition$PRIMNETT/PrimeAutorisque_pour_Exposition$AnneePolice
+
+  
+Aggreg_RC_Usage %>%   
+ggplot()+
+  geom_col(aes(y=Prime/656, x=as.factor(ANNEE), fill=CATERISQ,position = "dodge"))+
+  scale_y_continuous(breaks = 1e6*c(2,4,6), labels = paste0(c(2,4,6)," M€"))+
+    scale_fill_grey()+
+  ylab("Prime acquises")+
+  xlab("Années")+
+  ggtitle(paste0("Evolution des Primes RC Acquise par ",Label_variable))
+  
+
+Aggreg_RC_Usage %>%   
+ggplot()+
+  geom_col(aes(y=Exposition, x=as.factor(ANNEE), fill=CATERISQ,position = "dodge"))+
+  scale_y_continuous()+
+    scale_fill_grey()+
+  ylab("Année polices")+
+  xlab("Années")+
+  ggtitle(paste0("Evolution des années de police par ",Label_variable))
+ 
+ 
+# Critère: Puissance du véhicule
+Label_variable="Puissance du véhicule"
+Aggreg_RC_Usage=PrimeAutorisque_pour_Exposition %>% 
+ dplyr:: group_by(ANNEE,PUISVEHICAT)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              Exposition= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy=Prime/Exposition)
+
+
+Aggreg_RC_Usage %>%   
+ggplot()+
+  geom_col(aes(y=Prime/656, x=as.factor(ANNEE), fill=PUISVEHICAT,position = "dodge"))+
+  scale_y_continuous(breaks = 1e6*c(2,4,6), labels = paste0(c(2,4,6)," M€"))+
+    scale_fill_grey()+
+  ylab("Prime acquises")+
+  xlab("Années")+
+  ggtitle(paste0("Evolution des Primes RC Acquise par ",Label_variable))
+  
+
+Aggreg_RC_Usage %>%   
+ggplot()+
+  geom_col(aes(y=Exposition, x=as.factor(ANNEE), fill=PUISVEHICAT,position = "dodge"))+
+  scale_y_continuous()+
+    scale_fill_grey()+
+  ylab("Année polices")+
+  xlab("Années")+
+  ggtitle(paste0("Evolution des années de police par ",Label_variable))
+  
+
+### Représentation croisées des différentes variables.
+Aggreg_RC=PrimeAutoRisque_Sinistre %>% 
+ dplyr:: group_by(PUISVEHICAT,TYPEMOTE,CATERISQ,CODEZONE)%>%
+   dplyr::summarise(Prime=SumDouble(PRIMNETT,na.rm = TRUE),
+                              Exposition= SumDouble(AnneePolice,na.rm = TRUE),
+                                  PrimeMoy=Prime/Exposition)
+
+Graph<-Aggreg_RC%>%dplyr::filter(PrimeMoy>0,PrimeMoy<1e6, CATERISQ %in%c('401','402','412'), CODEZONE %in% c('1','2','3'))%>%
+  ggplot()+
+  geom_point(aes(x=Exposition,y=PrimeMoy,color=PUISVEHICAT,shape=TYPEMOTE))+
+  facet_grid(CATERISQ~CODEZONE)
+ggplotly(Graph)
+
+
+by(Aggreg_RC$PrimeMoy,Aggreg_RC$CATERISQ,summary)
+by(PrimeAutorisque_pour_Exposition$PrimeMoy,PrimeAutorisque_pour_Exposition$CATERISQ,summary)
+```
+
+##Analyse anomalie Présentation sur les cas d'anomalies.
+
+```{r}
+
+  Par_garantie_annee<-Base_Sinistre_Auto_Detection_Anomalie%>%dplyr::filter(ANNEESURV>params$PeriodeAnalyse,ANOMALIE==TRUE,MOTIF_ANOMAL !="SANS FLUX,")%>%dplyr::group_by(MOTIF_ANOMAL,ANNEESURV)%>%dplyr::summarise( CHARGENET= SumDouble(CHARGENET,na.rm = TRUE), PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE), RECENCALL=SumDouble(RECENC+RECENC_ANT,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE),PREVREC= SumDouble(AREC,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(Id_SINI), Nbre=n())
+
+   write.csv2(Par_garantie_annee,file =paste0(params$ANOMALIE,"ResumeAnomalie_parAnnee.csv"))
+           
+              
+ResumeAnomalie3<-Base_Sinistre_Auto_Detection_Anomalie%>%dplyr::filter(ANNEESURV>params$PeriodeAnalyse)%>%dplyr::group_by(MOTIF_ANOMAL)%>%
+  dplyr::summarise( CHARGENET= SumDouble(CHARGENET,na.rm = TRUE), PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE),PAYEALL= SumDouble(SINPAY_ANT+SINPAY,na.rm = TRUE), RECENCALL=SumDouble(RECENC+RECENC_ANT,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE),SAP= SumDouble(SAP,na.rm = TRUE),PREVREC= SumDouble(AREC,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(Id_SINI), Nbre=n())
+write.csv2(ResumeAnomalie3,file =paste0(params$ANOMALIE,"ResumeAnomalie_AllGarantie.csv"))
+
+ResumeAnomalie3_clos<-Base_Sinistre_Auto_Detection_Anomalie%>%dplyr::filter(ANNEESURV>params$PeriodeAnalyse,CLOS==TRUE)%>%dplyr::group_by(MOTIF_ANOMAL)%>%
+  dplyr::summarise( CHARGENET= SumDouble(CHARGENET,na.rm = TRUE), PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(Id_SINI), Nbre=n())
+write.csv2(ResumeAnomalie3_clos,file =paste0(params$ANOMALIE,"ResumeAnomalie_AllGarantie_clos.csv"))
+
+
+#Split
+ResumeAnomalie3_Split<-Base_Sinistre_Auto_Detection_Anomalie%>%dplyr::filter(ANNEESURV>params$PeriodeAnalyse)%>%dplyr::group_by(MOTIF_ANOMAL,CLOS)%>%
+  dplyr::summarise( CHARGENET= SumDouble(CHARGENET,na.rm = TRUE), PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE),PAYEALL= SumDouble(SINPAY_ANT+SINPAY,na.rm = TRUE),RECENCALL=SumDouble(RECENC+RECENC_ANT,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE),SAP= SumDouble(SAP,na.rm = TRUE),PREVREC= SumDouble(AREC,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(Id_SINI), Nbre=n())
+write.csv2(ResumeAnomalie3_Split,file =paste0(params$ANOMALIE,"ResumeAnomalie3_Split.csv"))
+
+## Détails des anomalies
+write.csv2(Base_Sinistre_Auto_Detection_Anomalie[Base_Sinistre_Auto_Detection_Anomalie$MOTIF_ANOMAL!="",],file =paste0(params$ANOMALIE,"Fichier_anomalie.csv"))
+
+#Split
+ResumeAnomalie3_Split_gar<-Base_Sinistre_Auto_Detection_Anomalie%>%dplyr::filter(ANNEESURV>params$PeriodeAnalyse)%>%dplyr::group_by(MOTIF_ANOMAL,CLOS,CODEGARA)%>%
+  dplyr::summarise( CHARGENET= SumDouble(CHARGENET,na.rm = TRUE), PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE),PAYEALL= SumDouble(SINPAY_ANT+SINPAY,na.rm = TRUE),RECENCALL=SumDouble(RECENC+RECENC_ANT,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE),SAP= SumDouble(SAP,na.rm = TRUE),PREVREC= SumDouble(AREC,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(Id_SINI), Nbre=n())
+write.csv2(ResumeAnomalie3_Split_gar,file =paste0(params$ANOMALIE,"ResumeAnomalie3_Split_gar.csv"))
+
+
+
+
+### la suite des dossiers ###
+ResumeAnomalie3_RC<-Base_Sinistre_Auto_Detection_Anomalie%>%dplyr::filter(CODEGARA %in% params$Liste_Garantie, ANNEESURV>params$PeriodeAnalyse)%>%dplyr::group_by(MOTIF_ANOMAL)%>%
+  dplyr::summarise( CHARGENET= SumDouble(CHARGENET,na.rm = TRUE), PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(Id_SINI), Nbre=n())
+
+ResumeAnomalieAnnee3<-Base_Sinistre_Auto_Detection_Anomalie%>%dplyr::filter(ANNEESURV>params$PeriodeAnalyse)%>%
+  dplyr::group_by(MOTIF_ANOMAL,ANNEESURV)%>%
+  dplyr::summarise( PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE), CHARGENET= SumDouble(CHARGENET,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(Id_SINI), Nbre=n())
+
+ResumeAnomalieAnnee3 %>%dplyr::filter(MOTIF_ANOMAL!="" & MOTIF_ANOMAL !="SANS FLUX,")%>%
+  ggplot() + geom_col(aes(x = as.factor(ANNEESURV), y=SAPNET, fill=MOTIF_ANOMAL ), position = "dodge")
+
+ggsave("ResumeAnomalieAnnee3.png",device="png", path=params$RESULTAT)
+
+
+ResumeAnomalie3 %>%dplyr::filter(MOTIF_ANOMAL!="" & MOTIF_ANOMAL !="SANS FLUX,")%>%
+  ggplot() + geom_col(aes(x = as.factor(MOTIF_ANOMAL), y=SAPNET, fill=MOTIF_ANOMAL ), position = "dodge")
+
+ResumeAnomalieAnnee3 %>%dplyr::filter(MOTIF_ANOMAL!="" , MOTIF_ANOMAL !="SANS FLUX,", ANNEESURV %in% c(2017,2018))%>%
+  ggplot() + geom_col(aes(x = as.factor(ANNEESURV), y=SAPNET, fill=MOTIF_ANOMAL ), position = "dodge")
+
+ggsave("ResumeAnomalie2017-2018.png",device="png", path=params$RESULTAT)
+
+
+ResumeAnomalie<-Base_SIN_RC_Auto_Analyse%>%dplyr::group_by(MOTIF_ANOMAL)%>%
+  dplyr::summarise( CHARGENET= SumDouble(CHARGENET,na.rm = TRUE), PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(ID_SINI), Nbre=n())
+
+write.csv2(ResumeAnomalie,file =paste0(params$ANOMALIE,"ResumeAnomalie.csv"))
+
+ResumeAnomalie_ouvert<-Base_SIN_RC_Auto_Analyse%>%dplyr::filter(CLOS==FALSE)%>%dplyr::group_by(MOTIF_ANOMAL)%>%
+  dplyr::summarise( CHARGENET= SumDouble(CHARGENET,na.rm = TRUE), PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(ID_SINI), Nbre=n())
+
+
+table(Base_SIN_RC_Auto_Analyse[Base_SIN_RC_Auto_Analyse$MOTIF_ANOMAL=="Doublon Numero de Sin et Gar,SAP NEGATIF",]$CODTYPSO)
+
+ResumeAnomalieAnnee<-Base_SIN_RC_Auto_Analyse%>%dplyr::group_by(MOTIF_ANOMAL,ANNEE)%>%
+  dplyr::summarise( PAYEALLNET= SumDouble(PAYEALLNET,na.rm = TRUE),SAPNET= SumDouble(SAPNET,na.rm = TRUE), CHARGENET= SumDouble(CHARGENET,na.rm = TRUE),Volume=SumDouble(abs(CHARGENET), na.rm = TRUE), NbreD=n_distinct(ID_SINI), Nbre=n())
+
+# Représentation Graphique des anomalies par année de survenance:
+Base_SIN_RC_Auto_Analyse %>%dplyr::filter(MOTIF_ANOMAL!="" & MOTIF_ANOMAL !="SANS FLUX,")%>%
+  ggplot() + geom_bar(aes(x = ANNEE, fill=MOTIF_ANOMAL ), position = "dodge")
+
+
+ResumeAnomalieAnnee %>%dplyr::filter(MOTIF_ANOMAL!="" & MOTIF_ANOMAL !="SANS FLUX,")%>%
+  ggplot() + geom_col(aes(x = as.factor(ANNEE), y=SAPNET, fill=MOTIF_ANOMAL ), position = "dodge")
+
+
+ResumeAnomalieAnnee %>%dplyr::filter(MOTIF_ANOMAL!="" & MOTIF_ANOMAL !="Charge Nulle,")%>%
+  ggplot() + geom_col(aes(x = ANNEE, y=NbreD, fill=MOTIF_ANOMAL ), position = "dodge")
+
+
+```
+
+```{r}
+#Divers
+
+
+  ggboxplot(Base_Detaillee_Qualifie, x = "CATERISQ", y = "FreqIndiv")
+
+  
+        Base_Detaillee_Qualifie%>%group_by(CATERISQ)%>%
+          identify_outliers(FreqIndiv)
+
+        
+      ##
+        model  <- lm(FreqIndiv ~ CATERISQ, data = Base_Detaillee_Qualifie)
+                modelWtd  <- lm(FreqIndiv ~ CATERISQ, data = Base_Detaillee_Qualifie, weights = AnneePolice)
+
+                
+               # ggqqplot(residuals(model))
+                
+              #  shapiro_test(residuals(model))
+
+                
+          ##
+             Base_Detaillee_Qualifie %>%
+                group_by(CATERISQ) %>%
+                  shapiro_test()
+
+             plot(model,1)
+             # Anova   
+             res.aov <- Base_Detaillee_Qualifie[c(1:1000),] %>% anova_test(FreqIndiv ~ CATERISQ)
+             res.aov
+             
+             data("PlantGrowth")
+set.seed(1234)
+PlantGrowth %>% sample_n_by(group, size = 1)
+
+PlantGrowth <- PlantGrowth %>%
+  reorder_levels(group, order = c("ctrl", "trt1", "trt2"))
+
+             res.aov <- PlantGrowth %>% anova_test( weight ~ group)
+             PlantGrowth2 <- Base_Detaillee_Qualifie[c(1:30),c('FreqIndiv','CATERISQ')]# %>% dplyr:: select(c(FreqIndiv,CATERISQ))
+             
+             PlantGrowth2$CATERISQ=as.factor(as.character( PlantGrowth2$CATERISQ))
+          res.aov.2 <-   PlantGrowth2 %>% anova_test(PlantGrowth2$FreqIndiv ~ PlantGrowth2$CATERISQ)
+    res.aov <-anova_test(PlantGrowth2, FreqIndiv ~ CATERISQ )
+    
+  PlantGrowth2$CATERISQ2=   PlantGrowth$group
+    PlantGrowth2$weight=   PlantGrowth$weight
+    PlantGrowth2$group=   PlantGrowth2$CATERISQ2
+    
+  anova_test(PlantGrowth, weight ~ group )
+  
+  PlantGrowth3=PlantGrowth
+  PlantGrowth4=PlantGrowth2[,c("weight","group")]
+   PlantGrowth5=PlantGrowth2[,c("FreqIndiv","CATERISQ")]
+
+  anova_test(PlantGrowth4, weight ~ group )
+    anova_test(PlantGrowth, weight ~ group )
+  
+    PlantGrowth2[,c("weight","group")]%>%anova_test( weight ~ group )
+
+  
+  PlantGrowth6=PlantGrowth5%>%dplyr::filter(CATERISQ!='405')
+  
+  PlantGrowth6$CATERISQ=as.factor(as.character(PlantGrowth6$CATERISQ))
+    anova_test(PlantGrowth6, FreqIndiv ~ CATERISQ )
+    
+        anova_test(PlantGrowth, FreqIndiv ~ CATERISQ )
+
+```

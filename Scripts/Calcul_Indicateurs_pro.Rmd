@@ -1,0 +1,833 @@
+---
+title: "Calcul_Indicateurs_pro"
+author: "TOURE"
+date: "20 août 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+#Importation des librairies
+
+library("openxlsx")
+library("xlsxjars") 
+library('readxl')
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(rio)
+library(readxl)
+library(lubridate)
+```
+
+
+
+
+
+```{r}
+# Chargement des données
+
+
+
+sinistre <- read_excel("<CHEMIN_LOCAL>/sinistre1_input.xlsx")
+sinistre
+
+prime <- read_excel("<CHEMIN_LOCAL>/prime1_input.xlsx")
+prime
+```
+
+
+```{r}
+prim_copi
+```
+
+
+
+```{r}
+# Copie du data frame de prime
+names(prime)[3]<-"Effet_min"
+#prime$Effet_min <- prime$effet_min
+prim_copi <- prime
+names(prim_copi)<-str_replace_all(names(prim_copi), c(" " = "_" , "," = "" ))
+
+
+sinistre_copi <- sinistre
+names(sinistre_copi)<-str_replace_all(names(sinistre_copi), c(" " = "_" , "," = "" ))
+
+# Fonction qui permet de remplacer les espaces contenus dans l'écriture de variables du data frame par _
+remplace_espace_variable <- function(df){
+  names(df) <- str_replace_all(names(df), c(" " = "_" , "," = "" ))
+  return(df)
+}
+
+# Transformation des données
+
+sinistre <- sinistre[,c("KEY","INTER","ANNEE","DATESURV","DATEDECL","NO SINISTRE","LIBELLE BRANCHE","GROUPE INTERMEDIAIRE","ASSURE","POLICE","SAP")]
+
+
+prime <- prime[, c("Police","Code Interm","Libelle Branche","Groupe  Intermediaire","Code Assure","Effet","Echeance","DATE EMISSION","Prime Nette","CA")]
+
+
+# Fonction de Création du numéro de police de façon unique
+unik_NumPolice <- function(df,police,code_intermediaire){
+  df$NUM_POLICE <- paste0(df$police,df$code_intermediaire)
+  return(df)
+}
+
+# Fonction de création du niméro de sinistre de façon unique
+unik_NumSinistre <- function(df,INTER,ANNEE,NO_SINISTRE){
+  df$NUM_SINISTRE <- paste0(df$INTER,df$ANNEE,df$NO_SINISTRE)
+  return(df)
+}
+
+
+# Pour verifier le nombre de valeur double d'une colonne d'un data frame
+
+
+detect_doublon <- function(df){
+  n_occur <- data.frame(table(df$NUM_POLICE))
+  n_occur[n_occur$Freq > 1,]
+}
+
+detect_doublon(sinistre)
+```
+
+
+```{r}
+# Recodage de la variable BRANCHE pour les données de sinistre
+# Cette focntion retourne un data frame avec ajout de la colonne "branche_code2" qui designe le recodage de la variable "LIBELLE_BRANCHE"
+
+recodage_branche = function(df){
+df = df %>%  mutate(
+  branche_code2 = ifelse( 
+    df$LIBELLE_BRANCHE == "Risques Techniques", "Risques d'entreprise",
+    ifelse(
+    df$LIBELLE_BRANCHE == "Autres Dommages aux biens",  "Risques d'entreprise",
+    ifelse(
+    df$LIBELLE_BRANCHE == "Incendie" & df$LIBELLE_BRANCHE == 'Multirisques Habitation',   "MRH",
+    ifelse(df$LIBELLE_BRANCHE == "Incendie", "Risques d'entreprise", 
+    ifelse(
+    df$LIBELLE_BRANCHE == "Automobile", "Automobile", 
+    ifelse(
+    df$LIBELLE_BRANCHE =="Responsabilité Civile Générale",  "Risques d'entreprise", 
+    ifelse(
+    df$LIBELLE_BRANCHE =="Transport Corps", "Risques d'entreprise",
+    ifelse(
+    df$LIBELLE_BRANCHE =="Transport Facultés Terrestres",  "Risques d'entreprise",
+    ifelse(
+    df$LIBELLE_BRANCHE =="Transport Facultés Aériennes",  "Risques d'entreprise", 
+    ifelse(
+    df$LIBELLE_BRANCHE =="Transport Facultés Maritimes",  "Risques d'entreprise",
+    ifelse(
+    df$LIBELLE_BRANCHE =="Assurance Santé" , "Santé", 
+    ifelse(
+    df$LIBELLE_BRANCHE =="Individuelle Accidents" , "Santé",  "branche_sini")))))))))))))
+return (df)}
+
+
+# Recodage de la variable Type Int pour les sinistres
+recodage_type_intermediaire = function(df){
+df = df %>%  mutate(
+    type_intermediaire_code2 = ifelse(
+      df$GROUPE_INTERMEDIAIRE == 'BUREAUX DIRECTS' , "Bureaux Directs", 
+      ifelse( df$GROUPE_INTERMEDIAIRE == "AGENTS MANDATAIRES" , "Bureaux Directs",
+      ifelse(df$GROUPE_INTERMEDIAIRE == "AGENTS GENERAUX" , "Agents Généraux",
+      ifelse(df$GROUPE_INTERMEDIAIRE == "COURTIERS"  , "Courtiers",
+      ifelse(df$GROUPE_INTERMEDIAIRE == "Apporteur" , "Bureaux Directs",
+      ifelse(df$GROUPE_INTERMEDIAIRE =="Force de vente" , "Bureaux Directs",
+      ifelse( df$GROUPE_INTERMEDIAIRE =="COMPAGNIES" , "Courtiers", "inter_sini"
+      ))))))))
+return (df)}
+
+
+tb_sin <- recodage_branche(sinistre)
+tb_sin <- recodage_type_intermediaire(tb_sin)
+unique(tb_sin$type_intermediaire_code2)
+```
+
+
+
+```{r}
+# Recodage de la variable BRANCHE pour les données de prime
+# Cette focntion retourne un data frame avec ajout de la colonne "branche_code2" qui designe le recodage de la variable "Libelle_Branche"
+recodage_branche_prim = function(df){
+df = df %>%  mutate(
+  branche_code2 = ifelse( 
+    df$Libelle_Branche == "Risques Techniques", "Risques d'entreprise",
+    ifelse(
+    df$Libelle_Branche == "Autres Dommages aux biens",  "Risques d'entreprise",
+    ifelse(
+    df$Libelle_Branche == "Incendie" & df$Libelle_Branche == 'Multirisques Habitation',   "MRH",
+    ifelse(df$Libelle_Branche == "Incendie", "Risques d'entreprise", 
+    ifelse(
+    df$Libelle_Branche == "Automobile", "Automobile", 
+    ifelse(
+    df$Libelle_Branche =="Responsabilité Civile Générale",  "Risques d'entreprise", 
+    ifelse(
+    df$Libelle_Branche =="Transport Corps", "Risques d'entreprise",
+    ifelse(
+    df$Libelle_Branche =="Transport Facultés Terrestres",  "Risques d'entreprise",
+    ifelse(
+    df$Libelle_Branche =="Transport Facultés Aériennes",  "Risques d'entreprise", 
+    ifelse(
+    df$Libelle_Branche =="Transport Facultés Maritimes",  "Risques d'entreprise",
+    ifelse(
+    df$Libelle_Branche =="Assurance Santé" , "Santé", 
+    ifelse(
+    df$Libelle_Branche =="Individuelle Accidents" , "Santé",
+    ifelse(
+    df$Libelle_Branche == "Assistance Au Voyage", "Santé",  "branche_prim"))))))))))))))
+return (df)}
+
+
+# Recodage de la variable Type Int pour les données de prime
+recodage_type_intermediaire_prim = function(df){
+df = df %>%  mutate(
+    type_intermediaire_code2 = ifelse(
+      df$Groupe__Intermediaire == "Bureau Direct" , "Bureaux Directs", 
+      ifelse( df$Groupe__Intermediaire == "Agent mandataires" , "Bureaux Directs",
+      ifelse(df$Groupe__Intermediaire == "Agent Général" , "Agents Généraux",
+      ifelse(df$Groupe__Intermediaire == "Courtier"  , "Courtiers",
+      ifelse(df$Groupe__Intermediaire == "Apporteur" , "Bureaux Directs",
+      ifelse(df$Groupe__Intermediaire =="Force de vente" , "Bureaux Directs",
+      ifelse(df$Groupe__Intermediaire =="Compagnie" , "Courtiers",
+      ifelse(df$Groupe__Intermediaire == "Bancassurance","Bancassurance", "inter_prim")
+      ))))))))
+return (df)}
+
+
+tb_prim <- recodage_branche_prim(prime)
+unique(tb_prim$branche_code2)
+
+tb_prim <- recodage_type_intermediaire_prim(tb_prim)
+unique(tb_prim$type_intermediaire_code2)
+```
+
+
+
+
+
+```{r}
+# Cette focntion permet de créer 3 types de groupement de la branche:
+# Groupement1: branches 51,52,53,54 devient 5; branches 81,82,89 devient 8; branche 1 reste inchangée; branche 2 reste inchangée; branche 3 reste inchangée; branche 4 reste inchangée; branche 7 reste inchangée
+
+# Groupement2: branches 51,52,53,54,7,1 devient "Risque entreprise"; branches 81,82,89 devient "Santé"; branches 2,3 deviennent  "Incendie" ; branche 4 devient "Automobile"; 
+
+# Groupement3: branches 51,52,53,54,7,1,2,3 devient "Risque entreprise"; branches 81,82,89 devient "Santé" ; branche 4 devient "Automobile"; 
+
+
+# Recodage de la variable BRANCHE pour les données de prime
+recodage_branche_prim1 = function(df){
+df = df %>%  mutate(
+  Groupement1 = if_else( df$Branche == 51 , 5,
+                         if_else(df$Branche == 52,5,
+                                 if_else(df$Branche == 53,5,
+                                         if_else(df$Branche == 54,5,
+                                                 if_else(df$Branche == 81,8,
+                                                         if_else(df$Branche == 82,8,
+                                                                 if_else(df$Branche == 89,8,
+                                                                        if_else(df$Branche == 1 , 1,
+                                                                                if_else(df$Branche == 2, 2,
+                                                                                     if_else(df$Branche == 3, 3,
+                                                                                            if_else(df$Branche == 4, 4, 
+                                                                                                   if_else(df$Branche ==7, 7, 0)))))))))))))
+df <- df %>% mutate(
+  Groupement2 = if_else( df$Groupement1 == 5 , "Risque entreprise",
+                          if_else(df$Groupement1 == 8,"Santé",
+                                  if_else(df$Groupement1 == 1 , "Risque entreprise",
+                                          if_else(df$Groupement1 == 2, "Incendie",
+                                                  if_else(df$Groupement1 == 3, "Incendie",
+                                                          if_else(df$Groupement1 == 4, "Automobile", 
+                                                                   if_else(df$Groupement1 ==7, "Risque entreprise",  "Grpe2"))))))))
+
+df <- df %>% mutate(
+  Groupement3 = if_else( df$Groupement1 == 5 , "Risque entreprise",
+                          if_else(df$Groupement1 == 8,"Santé",
+                                  if_else(df$Groupement1 == 1 , "Risque entreprise",
+                                          if_else(df$Groupement1 == 2, "Risque entreprise",
+                                                  if_else(df$Groupement1 == 3, "Risque entreprise",
+                                                          if_else(df$Groupement1 == 4, "Automobile", 
+                                                                   if_else(df$Groupement1 ==7, "Risque entreprise", "Grpe3"))))))))
+    
+return (df)
+}
+
+
+recodage_branche_prim12(prim_copi)
+
+names(prime)[3]<-"Effet_min"
+#prime$Effet_min <- prime$effet_min
+prim_copi <- prime
+sinistre_copi <- sinistre
+
+prim_copi
+prim_test <- recodage_branche_prim1(prim_copi)
+prim_test
+
+sinistre_test <- sinistre_copi
+
+#prim_test1 <- echeance_unique_NumPolice(prim_test)
+#prim_test1
+
+
+
+```
+
+
+
+
+```{r}
+# Cette fonction permet de garder le numero de police(Police+Code Intermediaire), ensuite la date effet la plus ancienne, fait ensuite l'aggregation de colonnes comme "CA", "Prime_nette"; les variables quantitatives que nous voulons utiliser pour la suite du traitement si  la date d'echeance est fixe et  quand la date d'effet change
+
+echeance_unique_NumPolice <- function(df){
+  resultat <- df %>% group_by(NUM_POLICE,Echeance)%>%
+    summarise(Effet_min = min(Effet),
+            sum_ca = sum(CA),
+            sum_prim_net =sum(Prime_Nette),
+            sum_Prime_Cedee = sum(Prime_Cedee),
+            sum_Prime_TTC = sum(Prime_TTC))%>% 
+  left_join(df,by= c("Effet_min"="Effet","NUM_POLICE", "Echeance"))%>%       
+    select(-c("CA","Prime_Nette","Prime_Cedee","Prime_TTC"))
+  return(resultat)
+    
+}
+
+echeance_unique_NumPolice(prim_copi)
+
+```
+
+
+
+```{r}
+# Cette fonction permet de rendre les NUM_POLICE et NUM_SINISTRE unique
+
+NumSinistre_unique_NumPolice <- function(df){
+  resultat <- df %>% group_by(NUM_POLICE,NUM_SINISTRE)%>%
+    summarise(DATESURV_min=min(DATESURV),
+            sum_EVAL_PRINCIPALE = sum(EVAL_PRINCIPALE),
+            sum_EVAL_HONORAIRE =sum(EVAL_HONORAIRE),
+            sum_SAP = sum(SAP),
+            sum_REGLEMENTS = sum(REGLEMENTS),
+            sum_ESTIMATION_RECOURS = sum(ESTIMATION_RECOURS),
+            sum_RECOURS_ABOUTIS = sum(RECOURS_ABOUTIS),
+            sum_COUT_TOTAL = sum(COUT_TOTAL)) %>% 
+    left_join(df,by = c("NUM_POLICE","NUM_SINISTRE")) %>% 
+    select(-c("EVAL_PRINCIPALE","EVAL_HONORAIRE","SAP","REGLEMENTS","ESTIMATION_RECOURS","RECOURS_ABOUTIS","COUT_TOTAL"))
+    
+  return(resultat[!duplicated(resultat[,c("NUM_POLICE","NUM_SINISTRE","DATESURV_min")]), ])
+    
+}
+```
+
+
+
+
+
+
+
+
+
+```{r}
+# Fonction pour le calcul de l'exposition sans tenir compte d'une période bien précise
+Expo<-function(DateEffet, DateFin)
+{
+  ## Base_annuelle correpond au nombre de jours de rÃ©fÃ©rence dans une annÃ©e
+  ## Cette fonction compre 1 pour une emissions sur 1 an, et 1/12 pour une police mensuelle
+  as.numeric(date(DateFin)- date(DateEffet)+1)/365.25  
+}
+
+function_exposition <- function(tb_prime){
+  exposition <- tb_prime %>% 
+    mutate(exposition=Expo(Effet_min,Echeance))
+  return(exposition)
+}
+
+function_exposition(prim_test1) 
+
+
+```
+
+
+```{r}
+
+# Fonction pour le calcul de l'exposition sur une période bien précise.
+
+
+diff_date<-function(DateEffet, DateFin)
+{
+  ## Base_annuelle correpond au nombre de jours de rÃ©fÃ©rence dans une annÃ©e
+  ## Cette fonction compre 1 pour une emissions sur 1 an, et 1/12 pour une police mensuelle
+  as.numeric(date(DateFin)- date(DateEffet)+1) 
+}
+
+
+
+
+AnneePoliceAcquisition<-function(DateEffet,Echeance,DebutAnnee,FinAnnee)
+{
+  # Renvoie l'année police pour une annee donnees
+  
+  #DebutAnnee = as.Date(paste("01/01/",Annee,sep = ""), "%d/%m/%Y")
+  #FinAnnee= as.Date(paste("31/12/",Annee,sep = ""), "%d/%m/%Y")
+  
+  DebutAnnee = date(DebutAnnee)
+  FinAnnee= date(FinAnnee)
+  
+  DateEffet = date(DateEffet)
+  Echeance = date(Echeance)
+  
+  AnneePoliceAcquisition=(DateEffet<FinAnnee & Echeance>DebutAnnee)*((sapply(as.numeric(FinAnnee-DateEffet),FUN=function(x){max(x,0)}) +   sapply(as.numeric(DateEffet-DebutAnnee),FUN=function(x){min(x,0)}) + sapply(as.numeric(Echeance-FinAnnee),FUN=function(x){min(x,0)})+1)/365.25)
+    
+  
+  #  sapply(as.numeric(FinAnnee-DateEffet),FUN=function(x){max(x,0)})
+  
+  # min(as.numeric(DateEffet-DebutAnnee),0)
+  return(AnneePoliceAcquisition)
+}
+
+# Fonction de calcul de l'exposition pour une période bien definie; par branche, groupe intermediaire, Année d'emission
+
+td = "2020-01-01"
+tf = "2020-12-31"
+exposition <- function(tb_prime,td,tf){
+  exposition <- tb_prime %>%
+    mutate(Annee_Emission= ExtractionAnnee(DATE_EMISSION))%>% 
+  mutate(expo=AnneePoliceAcquisition(Effet_min,Echeance,td,tf)) #%>% 
+  #group_by(NUM_POLICE)%>% 
+    #select(Police,Libelle_Branche,Groupe__Intermediaire)%>% 
+  #mutate(expo=Expo(Effet_min,Echeance))
+  return(exposition)
+}
+
+prim_test1 <- exposition(prim_test,td,tf) %>% 
+select(c("NUM_POLICE","Annee_Emission","Effet_min","Echeance","sum_ca","Groupement1","Groupement2","Groupement3","expo"))
+
+prim_test1
+```
+
+
+
+
+
+
+```{r}
+# Fonction de calcul du nombre de sinstre par Numéro de police
+
+tb_sin$NUM_SINISTRE <- paste0(tb_sin$INTER,tb_sin$ANNEE,tb_sin$NO_SINISTRE)
+
+nbr_sinistre_par_NumPolice <- function(tb_sin){
+  nbr_sinistre <- tb_sin %>% 
+   group_by(NUM_POLICE) %>%
+  summarise(nombre_sinistre=n_distinct(NUM_SINISTRE)) 
+  return(nbr_sinistre)
+}
+
+nbr_sinistre_par_NumPolice(sinistre_test)
+```
+
+
+```{r}
+# Fonction de calcul du nombre de sinstre par Numéro de police en tenant compte d'une période(td, tf)
+# td=date de debut de la période de calcul
+# tf=date de fin de la période de calcul
+# tb_sin=data frame des sinistres
+
+
+td = "2020-01-01"
+tf = "2020-06-30"
+nbr_sinistre1_par_periode_NumPolice <- function(tb_sin,td,tf){
+  nbr_sinistre <- tb_sin %>% 
+  filter( (DATESURV >= as.POSIXct(td) & DATESURV <= as.POSIXct(tf) )) %>% 
+  group_by(NUM_POLICE) %>%
+  summarise(nombre_sinistre=n_distinct(NUM_SINISTRE)) 
+  return(nbr_sinistre)
+}
+
+aa <- nbr_sinistre1_par_periode_NumPolice(sinistre,td,tf)
+```
+
+
+```{r}
+# Fonction de calcul du nombre de sinstre pour les Numéro Police dans le fichier des primes qui ont connu des sinistres dans le fichier sinistre
+
+# Ajouter "Annee_Survenance" au group_by pour grouper en fonction de l'année de survenance du sinistre
+
+td = "2020-01-01"
+tf = "2020-06-30"
+nbr_sinistre <- function(tb_prim,tb_sin,td,tf){
+  nbr_sinistre <- tb_prim %>% 
+  filter( (Echeance >= as.POSIXct(td) & Echeance <= as.POSIXct(tf) )| 
+          (Effet_min >= as.POSIXct(td) & Effet_min <= as.POSIXct(tf)) | 
+          (Effet_min >= as.POSIXct(td) & Echeance <= as.POSIXct(tf))
+          ) %>% 
+  distinct(NUM_POLICE) %>%
+  inner_join(tb_sin,by= c("NUM_POLICE"="NUM_POLICE")) %>%
+  mutate(Annee_Survenance= ExtractionAnnee(DATESURV))%>% 
+    group_by(NUM_POLICE,branche_code2,type_intermediaire_code2) %>%
+  summarise(nombre_sinistre=n_distinct(NUM_SINISTRE))
+  return(nbr_sinistre)
+}
+
+nbr_sinistre(tb_prim,tb_sin,td,tf)
+
+```
+
+
+
+```{r}
+#Bonne fonction pour le calcul de la fréquence
+freq <- function(df_prim,df_sinis){
+  frequence <- function_exposition(df_prim) %>% 
+    inner_join(nbr_sinistre_par_NumPolice(df_sinis), c("NUM_POLICE"="NUM_POLICE")) %>% 
+              mutate(frequence = nombre_sinistre/exposition)
+  return (frequence)
+}
+
+freq(prim_test,sinistre_test)
+```
+
+
+
+
+```{r}
+cout_moyen <- function(df,td,tf){
+result <-  charge_sinistre(df,td,tf) %>% 
+  left_join(nbr_sinistre1_par_periode_NumPolice(sinistre_copi,td,tf),by=c("NUM_POLICE"="NUM_POLICE")) %>% mutate(cout_moyen_sinistre=charge_sinistre/nombre_sinistre)
+return(result)
+  
+}
+```
+
+
+```{r}
+burning_cost <- function(df_prim,df_sinis){
+  result <- freq(df_sinis) %>% 
+    inner_join(function_exposition(df_prim), by = "NUM_POLICE") %>% 
+    mutate(burning_cost = )
+}
+```
+
+
+
+
+```{r}
+indicateur_complet <- function(df_sinis,df_prim){
+ sinis <-  df_sinis %>%  
+   group_by(NUM_POLICE) %>%  
+   summarise(sum_sap = sum(sum_SAP),
+            sum_reglement =sum(sum_REGLEMENTS),
+            sum_estimation_recours = sum(sum_ESTIMATION_RECOURS),
+            sum_recours_aboutis = sum(sum_RECOURS_ABOUTIS),
+            nombre_sinistre=n_distinct(NUM_SINISTRE)) %>% 
+    mutate(charge_sinistre= sum_sap+sum_reglement-sum_estimation_recours-sum_recours_aboutis,
+           cout_moyen_sinistre = charge_sinistre/nombre_sinistre)
+ 
+ 
+ combin_sin_prim <- sinis %>% inner_join(prim,by = "NUM_POLICE") %>% 
+   mutate(frequence = nombre_sinistre/expo,
+          burning_cost = frequence*cout_moyen_sinistre,
+          ratio_SP = RatioSP(charge_sinistre,prim_acquise_sur_td_tf)) 
+ return(combin_sin_prim)
+}
+```
+
+
+
+
+
+```{r}
+#  fonction pour le calcul de la fréquence en tenant compte d'une periode bien definie
+
+# tb_prim designe les données des primes
+# tb_sin designe les données des sinistres
+# td designe la date de debut de l'inventaire
+# tf designe la fin de l'inventaire
+# Si on veut tenir compte du filtre temps(année, mois), pour les indicateurs concernant les sinistres, on extrait l'année ou le mois dans DATESURV, pour les primes, on prend DATEEMISSION
+
+td = "2020-01-01"
+tf = "2020-06-30"
+#by= c("NUM_POLICE"="NUM_POLICE")
+frequence <- function(tb_prim,tb_sin,td,tf){
+  frequence <- exposition(tb_prim,td,tf) %>% inner_join(nbr_sinistre(tb_prim,tb_sin,td,tf), c("branche_code2" = "branche_code2", "type_intermediaire_code2" = "type_intermediaire_code2","NUM_POLICE"="NUM_POLICE")) %>% 
+              mutate(frequence = nombre_sinistre/expo)
+  return(frequence)
+}
+
+uu <- frequence(tb_prim,tb_sin,td,tf)
+uu
+```
+
+
+
+
+
+
+
+```{r}
+# Cette fonction calcule la charge de sinistre survenue dans la période td et tf par numero de police
+# Nous avons calculé le nombre de sinistre, la charge de sinistre et le cout moyen par numero de police
+td = "2020-01-01"
+tf = "2020-12-31"
+
+sinistre_copi$NUM_SINISTRE <- paste0(sinistre_copi$INTER,sinistre_copi$ANNEE,sinistre_copi$NO_SINISTRE)
+charge_sinistre <- function(df,td,tf){
+ charg_sin <-  df %>% filter(DATESURV>=as.POSIXct(td)& DATESURV<= as.POSIXct(tf)) %>% 
+   group_by(NUM_POLICE) %>% 
+   summarise(sum_sap = sum(sum_SAP),
+            sum_reglement =sum(sum_REGLEMENTS),
+            sum_estimation_recours = sum(sum_ESTIMATION_RECOURS),
+            sum_recours_aboutis = sum(sum_RECOURS_ABOUTIS),
+            nombre_sinistre=n_distinct(NUM_SINISTRE)) %>% 
+   #charg_sin <- charg_sin[!duplicated(charg_sin[,c("NUM_POLICE")]), ] %>% 
+    mutate(charge_sinistre= sum_sap+sum_reglement-sum_estimation_recours-sum_recours_aboutis,
+           cout_moyen = charge_sinistre/nombre_sinistre)
+  return(charg_sin)
+}
+
+sinistre_test <- charge_sinistre(sinistre,td,tf) %>% select(NUM_POLICE,nombre_sinistre,charge_sinistre,cout_moyen)
+
+
+```
+
+
+
+
+
+```{r}
+# Fonction pour le calcul de la prime acquise.
+
+
+diff_date<-function(DateEffet, DateFin)
+{
+  ## Base_annuelle correpond au nombre de jours de rÃ©fÃ©rence dans une annÃ©e
+  ## Cette fonction compre 1 pour une emissions sur 1 an, et 1/12 pour une police mensuelle
+  as.numeric(date(DateFin)- date(DateEffet)+1) 
+}
+
+
+
+
+AnneePoliceAcquisition<-function(DateEffet,Echeance,DebutAnnee,FinAnnee)
+{
+  # Renvoie l'annÃ©e police pour une annee donnees
+  
+  #DebutAnnee = as.Date(paste("01/01/",Annee,sep = ""), "%d/%m/%Y")
+  #FinAnnee= as.Date(paste("31/12/",Annee,sep = ""), "%d/%m/%Y")
+  
+  DebutAnnee = date(DebutAnnee)
+  FinAnnee= date(FinAnnee)
+  
+  DateEffet = date(DateEffet)
+  Echeance = date(Echeance)
+  
+  AnneePoliceAcquisition=(DateEffet<FinAnnee & Echeance>DebutAnnee)*((sapply(as.numeric(FinAnnee-DateEffet),FUN=function(x){max(x,0)}) +   sapply(as.numeric(DateEffet-DebutAnnee),FUN=function(x){min(x,0)}) + sapply(as.numeric(Echeance-FinAnnee),FUN=function(x){min(x,0)})+1)/365.25)
+    
+  
+  #  sapply(as.numeric(FinAnnee-DateEffet),FUN=function(x){max(x,0)})
+  
+  # min(as.numeric(DateEffet-DebutAnnee),0)
+  return(AnneePoliceAcquisition)
+}
+
+
+td = "2020-01-01"
+tf = "2020-12-31"
+
+prime_acquise <- function(df_prim, td, tf){
+  prime_acquise <- df_prim %>%
+          mutate(nbr_jour_prime_acquise=AnneePoliceAcquisition(Effet_min,Echeance,td,tf)) %>% 
+          mutate(prim_par_jour = sum_ca/duree_police) %>% 
+          mutate(prim_acquise_sur_td_tf = sum_ca*nbr_jour_prime_acquise)
+  return(prime_acquise)
+}
+
+#prime_acquise(uu,td, tf) %>% select(c("NUM_POLICE","sum_ca","prim_acquise_sur_td_tf","Effet_min","Echeance"))
+```
+
+
+
+```{r}
+
+# Fonction de calcul de l'exposition pour une période bien definie; par branche, groupe intermediaire, Année d'emission
+
+ExtractionAnnee<-function(ChaineDate)
+{
+  as.numeric(format(as.POSIXct(ChaineDate, "%Y-%m-%d"),"%Y"))
+  
+}
+
+# Ajouter "Annee_Emission" au group_by
+
+
+td = "2020-01-01"
+tf = "2020-12-31"
+exposition <- function(tb_prime,td,tf){
+  exposition <- tb_prime %>%
+    mutate(Annee_Emission= ExtractionAnnee(DATE_EMISSION))%>% 
+  mutate(expo=AnneePoliceAcquisition(Effet_min,Echeance,td,tf)) #%>% 
+  #group_by(NUM_POLICE)%>% 
+    #select(Police,Libelle_Branche,Groupe__Intermediaire)%>% 
+  #mutate(expo=Expo(Effet_min,Echeance))
+  return(exposition)
+}
+
+#prim_test1 <- exposition(prim_test,td,tf) %>% 
+#select(c("NUM_POLICE","Annee_Emission","Effet_min","Echeance","sum_ca","Groupement1","Groupement2","Groupement3","expo"))
+
+#prim_test1
+```
+
+
+
+
+
+```{r}
+# Cette fonction calcule la charge de sinistre survenue dans la période td et tf par numero de police
+# Nous avons calculé le nombre de sinistre, la charge de sinistre et le cout moyen par numero de police
+td = "2020-01-01"
+tf = "2020-12-31"
+
+sinistre_copi$NUM_SINISTRE <- paste0(sinistre_copi$INTER,sinistre_copi$ANNEE,sinistre_copi$NO_SINISTRE)
+charge_sinistre <- function(df,td,tf,dg){
+ charg_sin <-  df %>%  
+   group_by(NUM_POLICE) %>%  
+   summarise(sum_sap = sum(sum_SAP),
+            sum_reglement =sum(sum_REGLEMENTS),
+            sum_estimation_recours = sum(sum_ESTIMATION_RECOURS),
+            sum_recours_aboutis = sum(sum_RECOURS_ABOUTIS),
+            nombre_sinistre=n_distinct(NUM_SINISTRE)) %>% 
+   #charg_sin <- charg_sin[!duplicated(charg_sin[,c("NUM_POLICE")]), ] %>% 
+    mutate(charge_sinistre= sum_sap+sum_reglement-sum_estimation_recours-sum_recours_aboutis,
+           cout_moyen = charge_sinistre/nombre_sinistre)
+ combin_sin_prim <- charg_sin %>% inner_join(dg,by = "NUM_POLICE") %>% 
+   mutate(frequence = nombre_sinistre/expo) %>% 
+   mutate(cout_moyen_sinistre = charge_sinistre/nombre_sinistre) %>% 
+   mutate(burning_cost = frequence*cout_moyen_sinistre) %>% 
+   mutate(nbr_jour_prime_acquise=AnneePoliceAcquisition(effet_min,Echeance,td,tf)) %>% 
+   mutate(prim_acquise_sur_td_tf = sum_ca*nbr_jour_prime_acquise)
+ 
+  return(combin_sin_prim)
+}
+
+data <- charge_sinistre(sinistre_test,td,tf,prim_test1)
+data %>% filter(Groupement1==5)
+
+
+#########################################""""
+```
+
+
+```{r}
+RatioSP<-function(x,y)
+{
+  sum(x,na.rm=TRUE)/sum(y,na.rm=TRUE)
+}
+```
+
+
+
+```{r}
+indicateur_complet <- function(df_sinis,td,tf,df_prim){
+ sinis <-  df_sinis %>%  
+   group_by(NUM_POLICE) %>%  
+   summarise(sum_sap = sum(sum_SAP),
+            sum_reglement =sum(sum_REGLEMENTS),
+            sum_estimation_recours = sum(sum_ESTIMATION_RECOURS),
+            sum_recours_aboutis = sum(sum_RECOURS_ABOUTIS),
+            nombre_sinistre=n_distinct(NUM_SINISTRE)) %>% 
+    mutate(charge_sinistre= sum_sap+sum_reglement-sum_estimation_recours-sum_recours_aboutis,
+           cout_moyen_sinistre = charge_sinistre/nombre_sinistre)
+ 
+ prim <- df_prim %>% mutate(Annee_Emission= ExtractionAnnee(DATE_EMISSION),
+           expo=AnneePoliceAcquisition(Effet_min,Echeance,td,tf),
+           prim_acquise_sur_td_tf = sum_ca*expo)
+ 
+ combin_sin_prim <- sinis %>% inner_join(prim,by = "NUM_POLICE") %>% 
+   mutate(frequence = nombre_sinistre/expo,
+          burning_cost = frequence*cout_moyen_sinistre,
+          ratio_SP = RatioSP(charge_sinistre,prim_acquise_sur_td_tf)) 
+ return(combin_sin_prim)
+}
+```
+
+
+
+
+
+```{r}
+# Cette focntion prend en input 
+# df_sinis=données de sinistre
+# td=date de debut de l'inventaire
+# tf=date de fin de l'inventaire
+# df_prim=données de prime
+# et donne en output tous les indicateurs
+
+indicateur_complet_par_groupement <- function(df_sinis,td,tf,df_prim){
+ sinis <-  df_sinis %>%  
+   group_by(NUM_POLICE) %>%  
+   summarise(sum_sap = sum(sum_SAP),
+            sum_reglement =sum(sum_REGLEMENTS),
+            sum_estimation_recours = sum(sum_ESTIMATION_RECOURS),
+            sum_recours_aboutis = sum(sum_RECOURS_ABOUTIS),
+            nombre_sinistre=n_distinct(NUM_SINISTRE)) %>% 
+    mutate(charge_sinistre= sum_sap+sum_reglement-sum_estimation_recours-sum_recours_aboutis,
+           cout_moyen_sinistre = charge_sinistre/nombre_sinistre)
+ 
+ prim <- df_prim %>% mutate(Annee_Emission= ExtractionAnnee(DATE_EMISSION),
+           expo=AnneePoliceAcquisition(Effet_min,Echeance,td,tf),
+           prim_acquise_sur_td_tf = sum_ca*expo)
+ 
+ combin_sin_prim <- sinis %>% inner_join(prim,by = "NUM_POLICE") %>% 
+   mutate(frequence = nombre_sinistre/expo,
+          burning_cost = frequence*cout_moyen_sinistre,
+          ratio_SP = RatioSP(charge_sinistre,prim_acquise_sur_td_tf)) 
+   
+ grp1 <- combin_sin_prim %>% group_by(Groupement1,Annee_Emission) %>% 
+  summarise(Exposition_branche_annee = sum(expo),
+            Nbre_sinistre_branche_annee = sum(nombre_sinistre),
+            Charge_sinistre_branche_annee = sum(charge_sinistre),
+            prime_acquise_branche_annee = sum(prim_acquise_sur_td_tf),
+            Frequence_branche_annee = Nbre_sinistre_branche_annee/Exposition_branche_annee,
+            Cout_moyen_branche_annee = Charge_sinistre_branche_annee/Nbre_sinistre_branche_annee,
+            burning_cost_branche_annee = Frequence_branche_annee*Cout_moyen_branche_annee,
+            Ratio_SP_branche_annee = RatioSP(charge_sinistre,prim_acquise_sur_td_tf))
+ 
+ grp2 <- combin_sin_prim %>% group_by(Groupement2,Annee_Emission) %>% 
+  summarise(Exposition_branche_annee = sum(expo),
+            Nbre_sinistre_branche_annee = sum(nombre_sinistre),
+            Charge_sinistre_branche_annee = sum(charge_sinistre),
+            prime_acquise_branche_annee = sum(prim_acquise_sur_td_tf),
+            Frequence_branche_annee = Nbre_sinistre_branche_annee/Exposition_branche_annee,
+            Cout_moyen_branche_annee = Charge_sinistre_branche_annee/Nbre_sinistre_branche_annee,
+            burning_cost_branche_annee = Frequence_branche_annee*Cout_moyen_branche_annee,
+            Ratio_SP_branche_annee = RatioSP(charge_sinistre,prim_acquise_sur_td_tf))
+ grp3 <- combin_sin_prim %>% group_by(Groupement3,Annee_Emission) %>% 
+  summarise(Exposition_branche_annee = sum(expo),
+            Nbre_sinistre_branche_annee = sum(nombre_sinistre),
+            Charge_sinistre_branche_annee = sum(charge_sinistre),
+            prime_acquise_branche_annee = sum(prim_acquise_sur_td_tf),
+            Frequence_branche_annee = Nbre_sinistre_branche_annee/Exposition_branche_annee,
+            Cout_moyen_branche_annee = Charge_sinistre_branche_annee/Nbre_sinistre_branche_annee,
+            burning_cost_branche_annee = Frequence_branche_annee*Cout_moyen_branche_annee,
+            Ratio_SP_branche_annee = RatioSP(charge_sinistre,prim_acquise_sur_td_tf))
+  return(list(grp1,grp2,grp3))
+}
+
+data <- indicateur_complet_par_groupement(sinistre_test,td,tf,prim_test)
+data[[1]] #%>% filter(Groupement3=="Risque entreprise")
+
+```
+
+
+
+
+
+
+
+
+

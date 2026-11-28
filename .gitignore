@@ -2,7 +2,6 @@
 .dvc/cache
 .DS_Store
 /Docs
-/Scripts/*
-!/Scripts/.gitkeep
+/Scripts/**/*.rar
 /Results/Anomalies
 .venv/
