@@ -128,31 +128,64 @@ Autres méthodes d'installation de DVC : [documentation officielle](https://dvc.
 
 Le dossier `.venv/` est ignoré par Git.
 
-### 3. Récupérer le projet et les données
+### 3. Récupérer le projet
 
 ```bash
 git clone https://github.com/ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub.git
 cd Pricing_motor3rdliab_civ_pub
 git checkout publication
+```
 
-# Authentification DagsHub (à stocker en local, jamais dans Git)
+### 4. Récupérer les données : deux modes
+
+| | **Mode A : DVC** (recommandé) | **Mode B : `dagshub download`** (plus simple) |
+|---|---|---|
+| Authentification | token DagsHub à configurer une fois par clone | autorisation par un lien ouvert dans le navigateur |
+| Source des données | stockage DVC | bucket DagsHub (copie séparée) |
+| Version des données | celle du commit Git courant (`Data.dvc`) | celle du bucket, sans lien avec les commits |
+| Mise à jour | suit `dvc push` | **uniquement** si le bucket a été mis à jour séparément |
+
+> **Quel mode choisir ?** Utilisez le **mode A** pour toute analyse à reproduire. Le **mode B** convient pour obtenir rapidement les fichiers, mais ils **peuvent être plus anciens** que la version suivie par DVC.
+
+#### Mode A : DVC (recommandé)
+
+```bash
+# Une seule fois par clone
 dvc remote modify --local dagshub auth basic
 dvc remote modify --local dagshub user <votre_nom_utilisateur_dagshub>
 dvc remote modify --local dagshub password <votre_token_dagshub>
 
-# Téléchargement des données dans Data/
+# Télécharger les données dans Data/
+dvc pull
+
+# Vérifier : doit afficher "Cache and remote 'dagshub' are in sync."
+dvc status -c
+```
+
+Le token d'accès se génère dans DagsHub, dans les paramètres du compte, section *Tokens*. L'option `--local` l'enregistre (en clair) dans `.dvc/config.local`, un fichier ignoré par Git. L'URL du remote est déjà configurée dans `.dvc/config` : inutile de lancer `dvc remote add`.
+
+Pour les mises à jour suivantes :
+
+```bash
+git pull
 dvc pull
 ```
 
-Le token d'accès se génère dans DagsHub, sous *Paramètres* → *Tokens*. L'option `--local` l'enregistre dans `.dvc/config.local`, un fichier ignoré par Git.
+#### Mode B : `dagshub download` (plus simple)
 
-### 4. Vérifier que tout est synchronisé
+Depuis la racine du projet :
 
 ```bash
-dvc status -c      # doit afficher : Cache and remote 'dagshub' are in sync.
+dagshub download ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub s3://Pricing_motor3rdliab_civ_pub/Data Data
 ```
 
-### Autre méthode : le remote DVC via S3
+La syntaxe est `dagshub download <propriétaire>/<dépôt> s3://<dépôt>/<chemin_dans_le_bucket> <dossier_local>`.
+
+Si aucune autorisation n'est enregistrée, la commande affiche `AUTHORIZATION REQUIRED` et un lien. Ouvrez ce lien dans votre navigateur et autorisez le client avec votre compte DagsHub : le téléchargement démarre ensuite (environ 1,2 Go). Ne partagez pas ce lien.
+
+### Options avancées
+
+#### Remote DVC via S3
 
 DagsHub expose aussi le stockage DVC avec un protocole compatible S3. Cette méthode est une alternative au remote HTTPS.
 
@@ -175,23 +208,15 @@ dvc pull -r dagshub-s3
 
 Le même token DagsHub sert d'`access_key_id` et de `secret_access_key`.
 
-### Autre méthode : le bucket DagsHub Storage
+#### Un seul fichier du bucket
 
-Une copie des données est aussi disponible dans le bucket du dépôt (DagsHub Storage), sous `Data/`. Le bucket n'est pas versionné avec les branches Git : pour obtenir la version des données qui correspond à un commit, utilisez `dvc pull`.
-
-DagsHub doit être installé (voir « Installer DVC et DagsHub »). Depuis la racine du projet :
+Indiquez le chemin complet de destination, nom du fichier compris :
 
 ```bash
-dagshub login
-
-# Tout le dossier de données (environ 1,2 Go)
-dagshub download --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub Data Data
-
-# Un seul fichier : indiquer le chemin complet de destination, nom du fichier compris
 dagshub download --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub Data/Data_large_anonymise/Base_sinistre_Auto_ANO.xlsx Data/Data_large_anonymise/Base_sinistre_Auto_ANO.xlsx
 ```
 
-### Accès depuis Python
+#### Accès au bucket depuis Python
 
 Après `dagshub login`, le bucket est accessible avec un client compatible S3 (`boto3`, installé avec `dagshub`) :
 
@@ -209,13 +234,25 @@ for obj in s3.list_objects_v2(Bucket=bucket, Prefix="Data/").get("Contents", [])
 s3.download_file(bucket, "Data/test.txt", "test.txt")
 ```
 
-### Mettre à jour le bucket (mainteneurs uniquement)
+### Publier une nouvelle version des données (mainteneurs uniquement)
 
-L'envoi nécessite des droits d'écriture. Le bucket ne se met pas à jour avec `dvc push` : il faut y envoyer les fichiers séparément.
+L'envoi nécessite des droits d'écriture. Les données s'envoient avec **DVC** :
 
 ```bash
-dagshub upload --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub <fichier_local> <chemin_dans_le_bucket>
+dvc add Data
+git add Data.dvc
+git commit -m "Mise à jour des données"
+dvc push
+git push
 ```
+
+`dvc push` **ne met pas à jour le bucket** utilisé par le mode B. Pour que les deux modes fournissent les mêmes données, envoyez aussi chaque fichier ajouté ou modifié :
+
+```bash
+dagshub upload --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub Data/<fichier> Data/<fichier>
+```
+
+Un fichier supprimé en local reste dans le bucket tant qu'il n'y est pas supprimé.
 
 > **Important :** ne jamais ajouter de clés d'accès ou de mots de passe dans `.dvc/config` (versionné). Utiliser toujours `--local`.
 
