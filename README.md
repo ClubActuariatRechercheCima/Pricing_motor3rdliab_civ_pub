@@ -152,24 +152,69 @@ Le token d'accès se génère dans DagsHub, sous *Paramètres* → *Tokens*. L'o
 dvc status -c      # doit afficher : Cache and remote 'dagshub' are in sync.
 ```
 
-### Autre méthode : le bucket DagsHub Storage
+### Autre méthode : le remote DVC via S3
 
-Une copie des données est aussi disponible dans le bucket du dépôt (DagsHub Storage), sous `Data/`. Depuis la racine du projet :
+DagsHub expose aussi le stockage DVC avec un protocole compatible S3. Cette méthode est une alternative au remote HTTPS.
+
+| | |
+|---|---|
+| **Bucket S3** | `s3://dvc` |
+| **Endpoint** | `https://dagshub.com/ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub.s3` |
 
 ```bash
-# DagsHub doit être installé (voir « Installer DVC et DagsHub »)
-dagshub login
-dagshub download --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub Data Data
+pip install --upgrade "dvc[s3]"
+
+# --local : rien n'est écrit dans la configuration versionnée
+dvc remote add --local dagshub-s3 s3://dvc
+dvc remote modify --local dagshub-s3 endpointurl https://dagshub.com/ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub.s3
+dvc remote modify --local dagshub-s3 access_key_id <votre_token_dagshub>
+dvc remote modify --local dagshub-s3 secret_access_key <votre_token_dagshub>
+
+dvc pull -r dagshub-s3
 ```
 
-Le bucket n'est pas versionné avec les branches Git. Pour obtenir la version des données qui correspond à un commit, utilisez `dvc pull`.
+Le même token DagsHub sert d'`access_key_id` et de `secret_access_key`.
+
+### Autre méthode : le bucket DagsHub Storage
+
+Une copie des données est aussi disponible dans le bucket du dépôt (DagsHub Storage), sous `Data/`. Le bucket n'est pas versionné avec les branches Git : pour obtenir la version des données qui correspond à un commit, utilisez `dvc pull`.
+
+DagsHub doit être installé (voir « Installer DVC et DagsHub »). Depuis la racine du projet :
+
+```bash
+dagshub login
+
+# Tout le dossier de données (environ 1,2 Go)
+dagshub download --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub Data Data
+
+# Un seul fichier : indiquer le chemin complet de destination, nom du fichier compris
+dagshub download --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub Data/Data_large_anonymise/Base_sinistre_Auto_ANO.xlsx Data/Data_large_anonymise/Base_sinistre_Auto_ANO.xlsx
+```
 
 ### Accès depuis Python
 
+Après `dagshub login`, le bucket est accessible avec un client compatible S3 (`boto3`, installé avec `dagshub`) :
+
 ```python
 import dagshub
-dagshub.init(repo_owner="ClubActuariatRechercheCima",
-             repo_name="Pricing_motor3rdliab_civ_pub", mlflow=False)
+
+s3 = dagshub.get_repo_bucket_client("ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub")
+bucket = "Pricing_motor3rdliab_civ_pub"
+
+# Lister les fichiers
+for obj in s3.list_objects_v2(Bucket=bucket, Prefix="Data/").get("Contents", []):
+    print(obj["Key"], obj["Size"])
+
+# Télécharger un fichier
+s3.download_file(bucket, "Data/test.txt", "test.txt")
+```
+
+### Mettre à jour le bucket (mainteneurs uniquement)
+
+L'envoi nécessite des droits d'écriture. Le bucket ne se met pas à jour avec `dvc push` : il faut y envoyer les fichiers séparément.
+
+```bash
+dagshub upload --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub <fichier_local> <chemin_dans_le_bucket>
 ```
 
 > **Important :** ne jamais ajouter de clés d'accès ou de mots de passe dans `.dvc/config` (versionné). Utiliser toujours `--local`.
