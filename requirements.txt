@@ -1,0 +1,7 @@
+# Outils d'accès aux données (DVC + DagsHub).
+# Versions testées : dvc 3.67.1, dagshub 0.7.3.
+dvc>=3.67.1,<4
+dagshub>=0.7.3,<1
+
+# Optionnel, pour le remote DVC via S3 :
+# dvc[s3]>=3.67.1,<4

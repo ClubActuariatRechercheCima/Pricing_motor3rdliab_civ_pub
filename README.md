@@ -69,7 +69,9 @@ Quelques-uns des graphiques produits (dossier [`Results/`](Results/)) :
 ├── Notebooks/        # Notebooks (Python, R, etc.)
 ├── Results/          # Graphiques, tableaux et article
 │   └── Articles/     #   version de travail de l'article
-└── Scripts/          # Scripts R ayant produit les analyses (contenu non publié)
+├── Scripts/          # Scripts R ayant produit les analyses (contenu non publié)
+├── tools/            # Script de configuration DVC / DagsHub
+└── requirements.txt  # Dépendances Python pour l'accès aux données
 ```
 
 Le dossier `Data/` n'est **pas versionné par Git** : il est géré par DVC (voir ci-dessous).
@@ -92,9 +94,32 @@ Le fichier [`Data.dvc`](Data.dvc) contient l'empreinte (hash) du jeu de données
 - [Python 3](https://www.python.org/downloads/) avec `pip` ;
 - un compte [DagsHub](https://dagshub.com) disposant des droits de lecture sur le dépôt. Pour demander des droits, voir [Contact et accès au projet](#contact-et-accès-au-projet).
 
-### 2. Installer DVC et DagsHub
+### 2. Récupérer le projet
 
-Il est conseillé de les installer dans un environnement virtuel Python.
+```bash
+git clone https://github.com/ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub.git
+cd Pricing_motor3rdliab_civ_pub
+git checkout publication
+```
+
+### 3. Installer et configurer DVC et DagsHub
+
+#### Configuration automatique (Linux / macOS)
+
+Le script [`tools/setup_data.sh`](tools/setup_data.sh) installe les outils et configure les identifiants. Depuis la racine du projet :
+
+```bash
+bash tools/setup_data.sh          # installe et configure DVC et DagsHub
+bash tools/setup_data.sh --pull   # idem, puis télécharge les données
+```
+
+Il crée `.venv/`, installe [`requirements.txt`](requirements.txt), demande votre nom d'utilisateur et votre token DagsHub (saisie masquée), configure DVC dans `.dvc/config.local` et connecte le client avec `dagshub login --token`. Le client DagsHub conserve alors le token sur votre machine. Sous Windows, suivez les étapes manuelles.
+
+Sous Linux et macOS, le script ci-dessus fait tout automatiquement. Les étapes manuelles suivantes s'appliquent à tous les systèmes.
+
+#### Installation manuelle
+
+Il est conseillé d'installer les outils dans un environnement virtuel Python.
 
 **Linux / macOS**
 
@@ -114,7 +139,7 @@ py -m venv .venv
 
 ```bash
 python -m pip install --upgrade pip
-pip install --upgrade dvc dagshub
+pip install -r requirements.txt
 
 # Vérifier l'installation
 dvc --version
@@ -127,14 +152,6 @@ dagshub --help
 Autres méthodes d'installation de DVC : [documentation officielle](https://dvc.org/doc/install). Sur Debian ou Ubuntu, `python3 -m venv` peut nécessiter le paquet `python3-venv`.
 
 Le dossier `.venv/` est ignoré par Git.
-
-### 3. Récupérer le projet
-
-```bash
-git clone https://github.com/ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub.git
-cd Pricing_motor3rdliab_civ_pub
-git checkout publication
-```
 
 ### 4. Récupérer les données : deux modes
 
@@ -234,25 +251,27 @@ for obj in s3.list_objects_v2(Bucket=bucket, Prefix="Data/").get("Contents", [])
 s3.download_file(bucket, "Data/test.txt", "test.txt")
 ```
 
-### Publier une nouvelle version des données (mainteneurs uniquement)
+### Publier une nouvelle version des données (droits d'écriture requis)
 
-L'envoi nécessite des droits d'écriture. Les données s'envoient avec **DVC** :
+> ⚠️ **Tout `dvc push` doit être accompagné d'un envoi dans le bucket avec `dagshub upload --bucket`.** `dvc push` ne met à jour que le stockage DVC (mode A). Sans le second envoi, `dagshub download` (mode B) fournit **des données anciennes, sans avertissement**.
 
 ```bash
+# 1. Versionner et envoyer avec DVC
 dvc add Data
 git add Data.dvc
 git commit -m "Mise à jour des données"
 dvc push
+
+# 2. Synchroniser le bucket : une commande par fichier ajouté ou modifié
+dagshub upload --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub Data/<fichier> Data/<fichier>
+
+# 3. Publier le code
 git push
 ```
 
-`dvc push` **ne met pas à jour le bucket** utilisé par le mode B. Pour que les deux modes fournissent les mêmes données, envoyez aussi chaque fichier ajouté ou modifié :
-
-```bash
-dagshub upload --bucket ClubActuariatRechercheCima/Pricing_motor3rdliab_civ_pub Data/<fichier> Data/<fichier>
-```
-
-Un fichier supprimé en local reste dans le bucket tant qu'il n'y est pas supprimé.
+- Il n'existe pas de commande `dagshub push` : l'envoi se fait avec `dagshub upload`.
+- Envoyez les fichiers un par un, pour ne pas inclure de fichiers parasites tels que les `._*` de macOS (`.dvcignore` ne s'applique qu'à DVC).
+- Un fichier supprimé ou renommé en local reste dans le bucket tant qu'il n'y est pas supprimé.
 
 > **Important :** ne jamais ajouter de clés d'accès ou de mots de passe dans `.dvc/config` (versionné). Utiliser toujours `--local`.
 
